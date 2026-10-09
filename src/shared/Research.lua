@@ -1,4 +1,4 @@
---!strict
+--!nonstrict
 -- Research tree. Cost in cores. requires = all of; anyOf = at least one of; exclusive = locks out these nodes.
 -- effects keys (additive unless noted): cashMult biomassMult coreMult creaturePower mutationLuck
 --   upgradeDiscount fusionDiscount echoMult slotBonus offlineHours machineMult.<id>

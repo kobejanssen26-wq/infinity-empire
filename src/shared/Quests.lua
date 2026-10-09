@@ -1,4 +1,4 @@
---!strict
+--!nonstrict
 -- Quest / achievement / event framework data. Progress is derived from profile stats:
 --   Quests.getStat(profile, statName)  -> number
 -- kinds: tutorial (ordered, absolute), daily (rolled per UTC day, delta), repeat (delta, resets on claim),

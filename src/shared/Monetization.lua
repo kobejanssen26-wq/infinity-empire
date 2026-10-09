@@ -1,4 +1,4 @@
---!strict
+--!nonstrict
 -- Optional Robux items. IDs of 0 are "not configured": the shop hides them and purchases are refused.
 -- Fill in real IDs from the Creator Dashboard. Nothing here sells raw progression power:
 --   * gamepasses are convenience (inventory) or cosmetic (themes)

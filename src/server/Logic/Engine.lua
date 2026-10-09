@@ -1,4 +1,4 @@
---!strict
+--!nonstrict
 -- Pure, Roblox-service-free game rules. Every state change a player can cause goes through here.
 -- Functions take the player profile `p` and a ctx = { now: number, rng: Random-like, notify: ((string, any) -> ())? }
 -- and return (ok: boolean, message: string, data: any?).
@@ -48,7 +48,7 @@ function Engine.newProfile(now: number): any
 		tutorial = 1,
 		quests = { claimed = {}, repeatBase = {}, daily = { day = 0, ids = {}, base = {}, claimed = {} } },
 		achievements = {},
-		settings = { autoUpgrade = false, notifications = true, music = true },
+		settings = { autoUpgrade = false, notifications = true },
 		pity = 0,
 		eggsRun = 0,
 		lastSeen = now,
@@ -706,7 +706,7 @@ end
 
 function Engine.setSetting(p: any, key: any, value: any, ctx: Ctx): (boolean, string, any?)
 	if type(value) ~= "boolean" then return fail("Bad value") end
-	if key ~= "autoUpgrade" and key ~= "notifications" and key ~= "music" then return fail("Unknown setting") end
+	if key ~= "autoUpgrade" and key ~= "notifications" then return fail("Unknown setting") end
 	if key == "autoUpgrade" and value and not stats(p, ctx).flags.autoUpgrade then
 		return fail("Research Auto-Upgrader first")
 	end

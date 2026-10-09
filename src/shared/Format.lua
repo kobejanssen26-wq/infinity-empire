@@ -1,4 +1,4 @@
---!strict
+--!nonstrict
 local Format = {}
 
 local suffixes = { "", "K", "M", "B", "T", "Qa", "Qi" }

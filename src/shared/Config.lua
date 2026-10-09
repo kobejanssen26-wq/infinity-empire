@@ -1,4 +1,4 @@
---!strict
+--!nonstrict
 -- Global tuning constants. Everything numeric that designers may want to change lives here
 -- or in the per-domain config modules (Creatures, Machines, Research, Prestige, Quests).
 

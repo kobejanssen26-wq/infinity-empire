@@ -18,8 +18,7 @@
       }
     },
     "Workspace": {
-      "$className": "Workspace",
-      "$properties": { "StreamingEnabled": false }
+      "$className": "Workspace"
     }
   }
 }

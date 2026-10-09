@@ -1,4 +1,4 @@
---!strict
+--!nonstrict
 -- Rebirth upgrades bought with Echoes. level scaling: cost = base * growth^level.
 -- kind drives how Stats/Engine interpret `perLevel`.
 

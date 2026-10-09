@@ -1,4 +1,4 @@
---!strict
+--!nonstrict
 -- Machine templates. Add a table to `list` to add a machine; nothing else needs to change.
 -- produces: resource id. baseRate: units/sec at level 1. upgrade cost = upBase * upGrowth^level (cash).
 -- unlockCost: cash to build. zone: factory zone required. pos: layout offset (studs) from plot center.

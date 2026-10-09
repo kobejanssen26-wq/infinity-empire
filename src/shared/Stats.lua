@@ -1,4 +1,4 @@
---!strict
+--!nonstrict
 -- Derives every multiplier and production rate from a profile. Pure: the server uses it for
 -- authoritative production; the client uses the same function to display exact rates.
 

@@ -1,4 +1,4 @@
---!strict
+--!nonstrict
 -- Creature, mutation, trait, egg and fusion data. Pure data: add rows to extend the game.
 
 local Creatures = {}

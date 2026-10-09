@@ -35,7 +35,7 @@ for src in [root / "src" / "shared", root / "src" / "server" / "Logic", root / "
         (stage / f.name).write_text(txt)
 
 stub = ["--!nonstrict", "return {"]
-for mod in ["Config","Creatures","Machines","Research","Prestige","Quests","Formulas","Stats","Monetization"]:
+for mod in ["Config","Creatures","Machines","Research","Prestige","Quests","Formulas","Stats","Monetization","Format"]:
     stub.append('\t%s = require("./%s"),' % (mod, mod))
 stub.append("}")
 (stage / "Shared.lua").write_text("\n".join(stub) + "\n")

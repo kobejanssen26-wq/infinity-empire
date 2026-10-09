@@ -1,4 +1,4 @@
---!strict
+--!nonstrict
 -- Single place where server code reaches the shared (ReplicatedStorage) modules.
 -- tools/stage_tests.py replaces this file with a flat-require stub for out-of-Roblox unit tests.
 
@@ -15,4 +15,5 @@ return {
 	Formulas = require(Shared:WaitForChild("Formulas")),
 	Stats = require(Shared:WaitForChild("Stats")),
 	Monetization = require(Shared:WaitForChild("Monetization")),
+	Format = require(Shared:WaitForChild("Format")),
 }

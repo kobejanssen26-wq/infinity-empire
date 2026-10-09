@@ -1,4 +1,4 @@
---!strict
+--!nonstrict
 -- Pure cost / scaling formulas. Shared by client (display) and server (authority).
 
 local Config = require(script.Parent.Config)
