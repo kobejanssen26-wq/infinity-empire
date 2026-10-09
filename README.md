@@ -60,7 +60,7 @@ tests/ tools/          see "Testing"
 * **18 creatures, 6 rarities, 5 mutation variants, 4 genetic traits, 4 eggs with odds + pity, 14 fusion recipes**
   (mythic is fusion-only), creature levels (Biomass), a collection Index with discovery rewards and server-wide
   announcements for rare discoveries (cross-server via MessagingService).
-* **Research:** 5 branches, 24 nodes, prerequisites, *exclusive* specialisations, automation unlocks (Auto-Upgrader, Smart Assignment).
+* **Research:** 5 branches, 23 nodes, prerequisites, *exclusive* specialisations, automation unlocks (Auto-Upgrader, Smart Assignment).
 * **Rebirth:** requirement grows 3x per rebirth, Echoes reward, Echo shop (6 upgrades), explicit confirmation dialog that lists
   what is lost / kept / gained.
 * **Quests:** 9-step tutorial, 3 daily quests (rolled per UTC day), repeatables, milestones, 10 achievements (auto-granted),
