@@ -1,0 +1,4494 @@
+<roblox version="4"><Item class="Workspace" referent="RBX1"><Properties><string name="Name">Workspace</string></Properties></Item><Item class="Lighting" referent="RBX2"><Properties><string name="Name">Lighting</string></Properties></Item><Item class="ReplicatedStorage" referent="RBX15"><Properties><string name="Name">ReplicatedStorage</string></Properties><Item class="Folder" referent="RBX14"><Properties><string name="Name">Shared</string></Properties><Item class="ModuleScript" referent="RBX3"><Properties><string name="Name">Config</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Global tuning constants. Everything numeric that designers may want to change lives here
+-- or in the per-domain config modules (Creatures, Machines, Research, Prestige, Quests).
+
+local Config = {}
+
+Config.GameName = "ECLIPSE: INFINITE EMPIRE"
+Config.DataVersion = 1
+
+-- All stored/produced values are clamped here so they stay exactly representable
+-- (doubles are integer-exact up to ~9e15) and ordered datastores can hold them.
+Config.MaxValue = 1e15
+
+Config.Resources = {
+	{ id = "cash", name = "Cash", icon = "$", color = Color3.fromRGB(120, 230, 140) },
+	{ id = "biomass", name = "Biomass", icon = "B", color = Color3.fromRGB(150, 220, 90) },
+	{ id = "cores", name = "Cores", icon = "C", color = Color3.fromRGB(90, 190, 255) },
+	{ id = "echoes", name = "Echoes", icon = "E", color = Color3.fromRGB(190, 120, 255) },
+}
+
+Config.Rarities = {
+	{ id = "Common", color = Color3.fromRGB(190, 195, 205) },
+	{ id = "Uncommon", color = Color3.fromRGB(110, 220, 120) },
+	{ id = "Rare", color = Color3.fromRGB(80, 160, 255) },
+	{ id = "Epic", color = Color3.fromRGB(180, 100, 255) },
+	{ id = "Legendary", color = Color3.fromRGB(255, 180, 50) },
+	{ id = "Mythic", color = Color3.fromRGB(255, 80, 120) },
+}
+
+Config.Elements = {
+	ember = { name = "Ember", color = Color3.fromRGB(255, 120, 60) },
+	stone = { name = "Stone", color = Color3.fromRGB(170, 150, 120) },
+	bio = { name = "Bio", color = Color3.fromRGB(120, 220, 90) },
+	arc = { name = "Arc", color = Color3.fromRGB(90, 200, 255) },
+	void = { name = "Void", color = Color3.fromRGB(160, 90, 255) },
+}
+
+-- Machine scaling -------------------------------------------------------------
+Config.MachineMaxLevel = 250
+Config.MachineLevelStep = 0.25 -- +25% of base per level (additive part)
+Config.MachineMilestones = { 25, 50, 100, 200 } -- each doubles output
+Config.MachineSlotLevels = { 1, 10, 30, 75 } -- levels at which slots 1..4 unlock
+
+-- Creature scaling ------------------------------------------------------------
+Config.CreatureMaxLevel = 50
+Config.CreatureLevelStep = 0.12
+Config.CreatureLevelCostBase = 5 -- biomass
+Config.CreatureLevelCostGrowth = 1.22
+Config.IncompatibleEfficiency = 0.35 -- power multiplier when element != machine element
+Config.BaseInventory = 60
+Config.GamepassInventoryBonus = 60
+
+-- Hatching ----------------------------------------------------------------------
+Config.PityThreshold = 30 -- hatches without Rare+ before the next hatch is guaranteed Rare+
+Config.PityMinRarity = 3 -- index into Rarities (3 = Rare)
+
+-- Misc economy ------------------------------------------------------------------
+Config.StartCash = 25
+Config.BaseOfflineHours = 1
+Config.OfflineEfficiency = 0.5
+Config.MaxUpgradeDiscount = 0.6
+Config.EchoPassiveBonus = 0.01 -- +1% cash per echo ever earned
+Config.RebirthEchoDivisor = 1e7
+
+Config.Rebirth = {
+	baseRequirement = 5e7, -- run cash required for the first rebirth
+	requirementGrowth = 3, -- per completed rebirth
+	minZone = 3,
+}
+
+-- Server behaviour ------------------------------------------------------------
+Config.TickSeconds = 1
+Config.AutoSaveSeconds = 60
+Config.LeaderboardWriteSeconds = 120
+Config.LeaderboardReadSeconds = 120
+Config.LeaderboardSize = 15
+
+-- Remote rate limit: token bucket per player.
+Config.RateLimit = { capacity = 20, refillPerSecond = 8 }
+-- Per-action stricter costs (tokens consumed). Default is 1.
+Config.ActionCost = {
+	buyEgg = 2,
+	fuse = 2,
+	rebirth = 10,
+	autoAssign = 4,
+	visit = 5,
+}
+
+return Config
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX4"><Properties><string name="Name">Creatures</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Creature, mutation, trait, egg and fusion data. Pure data: add rows to extend the game.
+
+local Creatures = {}
+
+-- power: contribution to machine output multiplier at level 1 (see Stats).
+-- passive: { kind = value } applied while ASSIGNED to a machine.
+--   cashMult / biomassMult / coreMult / mutationLuck / upgradeDiscount (fractions)
+Creatures.list = {
+	-- Common
+	{ id = "cindermite", name = "Cindermite", rarity = 1, element = "ember", power = 0.15, desc = "A restless ember bug." },
+	{ id = "pebblet", name = "Pebblet", rarity = 1, element = "stone", power = 0.15, desc = "Rolls into things." },
+	{ id = "mossling", name = "Mossling", rarity = 1, element = "bio", power = 0.15, desc = "Smells of rain." },
+	{ id = "zapling", name = "Zapling", rarity = 1, element = "arc", power = 0.15, desc = "Static with legs." },
+	-- Uncommon
+	{ id = "magmaroo", name = "Magmaroo", rarity = 2, element = "ember", power = 0.5, passive = { cashMult = 0.02 }, desc = "Hops on hot coals." },
+	{ id = "slabbit", name = "Slabbit", rarity = 2, element = "stone", power = 0.5, passive = { cashMult = 0.02 }, desc = "Heavy for a rabbit." },
+	{ id = "sporeling", name = "Sporeling", rarity = 2, element = "bio", power = 0.5, passive = { biomassMult = 0.04 }, desc = "Sneezes spores." },
+	{ id = "arcmoth", name = "Arcmoth", rarity = 2, element = "arc", power = 0.5, passive = { coreMult = 0.04 }, desc = "Drawn to reactor light." },
+	-- Rare
+	{ id = "pyrofox", name = "Pyrofox", rarity = 3, element = "ember", power = 1.5, passive = { cashMult = 0.04 }, desc = "Three tails, all on fire." },
+	{ id = "geodrake", name = "Geodrake", rarity = 3, element = "stone", power = 1.5, passive = { upgradeDiscount = 0.01 }, desc = "Hoards crystals, haggles hard." },
+	{ id = "bloomhound", name = "Bloomhound", rarity = 3, element = "bio", power = 1.5, passive = { biomassMult = 0.06 }, desc = "Flowers grow where it naps." },
+	{ id = "voltwisp", name = "Voltwisp", rarity = 3, element = "arc", power = 1.5, passive = { coreMult = 0.06 }, desc = "A thought made of lightning." },
+	-- Epic
+	{ id = "infernowyrm", name = "Infernowyrm", rarity = 4, element = "ember", power = 4, passive = { cashMult = 0.06 }, desc = "Coiled around the forge chimney." },
+	{ id = "hivemind", name = "Hivemind", rarity = 4, element = "bio", power = 4, passive = { biomassMult = 0.10 }, desc = "Many bodies, one opinion." },
+	{ id = "riftcat", name = "Riftcat", rarity = 4, element = "void", power = 4, passive = { mutationLuck = 0.10 }, desc = "Was never entirely here." },
+	-- Legendary
+	{ id = "solarphoenix", name = "Solar Phoenix", rarity = 5, element = "ember", power = 12, passive = { cashMult = 0.12 }, desc = "Rebirth is its hobby." },
+	{ id = "chronogolem", name = "Chrono Golem", rarity = 5, element = "stone", power = 12, passive = { upgradeDiscount = 0.03 }, desc = "Time bends around it." },
+	-- Mythic (fusion only)
+	{ id = "eclipseleviathan", name = "Eclipse Leviathan", rarity = 6, element = "void", power = 40, passive = { cashMult = 0.25, mutationLuck = 0.15 }, desc = "The reason the sun goes out." },
+}
+
+Creatures.byId = {} :: { [string]: any }
+for _, c in ipairs(Creatures.list) do
+	Creatures.byId[c.id] = c
+end
+
+Creatures.StarterCreature = "cindermite"
+
+-- Mutation variants. chance is the base roll (before luck) for non-normal tiers, checked rarest first.
+Creatures.mutations = {
+	{ id = "normal", name = "Normal", mult = 1, chance = 1, color = Color3.fromRGB(255, 255, 255) },
+	{ id = "shiny", name = "Shiny", mult = 1.5, chance = 0.06, color = Color3.fromRGB(255, 240, 150) },
+	{ id = "golden", name = "Golden", mult = 2.5, chance = 0.015, color = Color3.fromRGB(255, 200, 40) },
+	{ id = "prismatic", name = "Prismatic", mult = 5, chance = 0.003, color = Color3.fromRGB(255, 120, 255) },
+	{ id = "eclipse", name = "Eclipse", mult = 12, chance = 0.0004, color = Color3.fromRGB(120, 40, 200) },
+}
+Creatures.mutationIndex = {} :: { [string]: number }
+for i, m in ipairs(Creatures.mutations) do
+	Creatures.mutationIndex[m.id] = i
+end
+
+-- Genetic traits: rolled once at birth. powerMult multiplies power; luck adds to mutation luck while assigned.
+Creatures.traits = {
+	{ id = "none", name = "Plain", weight = 70, powerMult = 1, luck = 0 },
+	{ id = "swift", name = "Swift", weight = 12, powerMult = 1.15, luck = 0, desc = "+15% power" },
+	{ id = "hardy", name = "Hardy", weight = 10, powerMult = 1.10, luck = 0, desc = "+10% power" },
+	{ id = "fertile", name = "Fertile", weight = 8, powerMult = 1, luck = 0.05, desc = "+5% mutation luck" },
+}
+Creatures.traitById = {} :: { [string]: any }
+for _, t in ipairs(Creatures.traits) do
+	Creatures.traitById[t.id] = t
+end
+
+-- Eggs: weights per rarity index. cost in `currency`. Mythic (6) is never in eggs.
+Creatures.eggs = {
+	{ id = "common", name = "Scrap Egg", currency = "cash", cost = 120, zone = 1, weights = { 80, 18, 2 }, color = Color3.fromRGB(200, 200, 210) },
+	{ id = "hatchery", name = "Hatchery Egg", currency = "cash", cost = 6000, zone = 2, weights = { 0, 62, 34, 4 }, color = Color3.fromRGB(110, 220, 120) },
+	{ id = "bio", name = "Biomass Egg", currency = "biomass", cost = 150, zone = 3, weights = { 0, 0, 72, 25, 3 }, color = Color3.fromRGB(150, 220, 90) },
+	{ id = "rift", name = "Rift Egg", currency = "cores", cost = 120, zone = 4, requiresResearch = "dim3", weights = { 0, 0, 40, 48, 12 }, color = Color3.fromRGB(190, 120, 255) },
+}
+Creatures.eggById = {} :: { [string]: any }
+for _, e in ipairs(Creatures.eggs) do
+	Creatures.eggById[e.id] = e
+end
+
+-- Fusion recipes: inputs = species counts, validated server-side. cost in biomass.
+Creatures.recipes = {
+	{ id = "f_magmaroo", inputs = { cindermite = 3 }, result = "magmaroo", cost = 10 },
+	{ id = "f_slabbit", inputs = { pebblet = 3 }, result = "slabbit", cost = 10 },
+	{ id = "f_sporeling", inputs = { mossling = 3 }, result = "sporeling", cost = 10 },
+	{ id = "f_arcmoth", inputs = { zapling = 3 }, result = "arcmoth", cost = 10 },
+	{ id = "f_pyrofox", inputs = { magmaroo = 3 }, result = "pyrofox", cost = 80 },
+	{ id = "f_geodrake", inputs = { slabbit = 3 }, result = "geodrake", cost = 80 },
+	{ id = "f_bloomhound", inputs = { sporeling = 3 }, result = "bloomhound", cost = 80 },
+	{ id = "f_voltwisp", inputs = { arcmoth = 3 }, result = "voltwisp", cost = 80 },
+	{ id = "f_infernowyrm", inputs = { pyrofox = 3 }, result = "infernowyrm", cost = 600 },
+	{ id = "f_hivemind", inputs = { bloomhound = 3 }, result = "hivemind", cost = 600 },
+	{ id = "f_riftcat", inputs = { voltwisp = 1, bloomhound = 1, geodrake = 1 }, result = "riftcat", cost = 700 },
+	{ id = "f_solarphoenix", inputs = { infernowyrm = 2, geodrake = 1 }, result = "solarphoenix", cost = 5000 },
+	{ id = "f_chronogolem", inputs = { hivemind = 2, geodrake = 1 }, result = "chronogolem", cost = 5000 },
+	{ id = "f_eclipseleviathan", inputs = { solarphoenix = 1, chronogolem = 1, riftcat = 1 }, result = "eclipseleviathan", cost = 60000 },
+}
+Creatures.recipeById = {} :: { [string]: any }
+for _, r in ipairs(Creatures.recipes) do
+	Creatures.recipeById[r.id] = r
+end
+
+Creatures.DiscoveryReward = {
+	-- by rarity index: first time a species/mutation combo is owned
+	cash = { 50, 200, 1000, 5000, 25000, 100000 },
+	cores = { 0, 0, 1, 3, 8, 20 },
+}
+-- extra multiplier for non-normal mutation discoveries
+Creatures.MutationDiscoveryMult = 3
+
+return Creatures
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX5"><Properties><string name="Name">Format</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+local Format = {}
+
+local suffixes = { "", "K", "M", "B", "T", "Qa", "Qi" }
+
+function Format.number(n: number): string
+	if n ~= n then
+		return "0"
+	end
+	if n < 1000 then
+		if n >= 100 or n == math.floor(n) then
+			return string.format("%d", math.floor(n))
+		end
+		return string.format("%.1f", n)
+	end
+	local i = 1
+	while n >= 1000 and i < #suffixes do
+		n /= 1000
+		i += 1
+	end
+	if n >= 100 then
+		return string.format("%d%s", math.floor(n), suffixes[i])
+	elseif n >= 10 then
+		return string.format("%.1f%s", n, suffixes[i])
+	end
+	return string.format("%.2f%s", n, suffixes[i])
+end
+
+--- Rates: keeps one decimal below 10 so 0.08/s stays readable.
+function Format.rate(n: number): string
+	if n < 10 then
+		return string.format("%.2f", n)
+	end
+	return Format.number(n)
+end
+
+function Format.percent(f: number): string
+	return string.format("%d%%", math.floor(f * 100 + 0.5))
+end
+
+function Format.duration(sec: number): string
+	sec = math.max(0, math.floor(sec))
+	local h = sec // 3600
+	local m = (sec % 3600) // 60
+	local s = sec % 60
+	if h > 0 then
+		return string.format("%dh %02dm", h, m)
+	elseif m > 0 then
+		return string.format("%dm %02ds", m, s)
+	end
+	return string.format("%ds", s)
+end
+
+return Format
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX6"><Properties><string name="Name">Formulas</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Pure cost / scaling formulas. Shared by client (display) and server (authority).
+
+local Config = require(script.Parent.Config)
+local Machines = require(script.Parent.Machines)
+
+local Formulas = {}
+
+function Formulas.clamp(n: number): number
+	if n ~= n then
+		return 0
+	end
+	return math.clamp(n, 0, Config.MaxValue)
+end
+
+--- Output multiplier of a machine level (additive growth, doubling at milestones).
+function Formulas.machineLevelMult(level: number): number
+	local m = 1 + Config.MachineLevelStep * (level - 1)
+	for _, ms in ipairs(Config.MachineMilestones) do
+		if level >= ms then
+			m *= 2
+		end
+	end
+	return m
+end
+
+--- Slots a machine has at `level` (before research/prestige slot bonuses).
+function Formulas.baseSlots(level: number): number
+	local n = 0
+	for _, l in ipairs(Config.MachineSlotLevels) do
+		if level >= l then
+			n += 1
+		end
+	end
+	return n
+end
+
+--- Cash cost to raise machine `id` from `level` to level+1.
+function Formulas.upgradeCost(id: string, level: number, discount: number): number
+	local m = Machines.byId[id]
+	local d = math.clamp(discount, 0, Config.MaxUpgradeDiscount)
+	return Formulas.clamp(math.floor(m.upBase * m.upGrowth ^ level * (1 - d)))
+end
+
+--- Total cost of n consecutive upgrades and how many are affordable with `budget` (<= n).
+function Formulas.upgradeBulk(id: string, level: number, discount: number, budget: number, maxCount: number): (number, number)
+	local total, count = 0, 0
+	local limit = math.min(maxCount, Config.MachineMaxLevel - level)
+	for i = 0, limit - 1 do
+		local c = Formulas.upgradeCost(id, level + i, discount)
+		if total + c > budget then
+			break
+		end
+		total += c
+		count += 1
+	end
+	return total, count
+end
+
+function Formulas.creatureLevelMult(level: number): number
+	return 1 + Config.CreatureLevelStep * (level - 1)
+end
+
+--- Biomass cost to raise a creature from `level` to level+1.
+function Formulas.creatureLevelCost(rarity: number, level: number): number
+	local base = Config.CreatureLevelCostBase * Config.CreatureLevelCostGrowth ^ (level - 1)
+	return Formulas.clamp(math.floor(base * (1 + (rarity - 1) * 1.5)))
+end
+
+function Formulas.rebirthRequirement(rebirths: number): number
+	return Formulas.clamp(math.floor(Config.Rebirth.baseRequirement * Config.Rebirth.requirementGrowth ^ rebirths))
+end
+
+function Formulas.echoGain(runCash: number, echoMult: number): number
+	if runCash < Config.RebirthEchoDivisor then
+		return 0
+	end
+	return math.floor(math.sqrt(runCash / Config.RebirthEchoDivisor) * (1 + echoMult))
+end
+
+function Formulas.prestigeCost(upgrade: any, level: number): number
+	return Formulas.clamp(math.ceil(upgrade.base * upgrade.growth ^ level))
+end
+
+--- Egg price rises with eggs bought this run (resets on rebirth), softly capped at 12x.
+function Formulas.eggCost(egg: any, eggsThisRun: number): number
+	return Formulas.clamp(math.ceil(egg.cost * math.min(12, 1 + eggsThisRun * 0.02)))
+end
+
+function Formulas.zoneCost(zone: number): number
+	return Machines.zones[zone].cost
+end
+
+return Formulas
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX7"><Properties><string name="Name">Machines</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Machine templates. Add a table to `list` to add a machine; nothing else needs to change.
+-- produces: resource id. baseRate: units/sec at level 1. upgrade cost = upBase * upGrowth^level (cash).
+-- unlockCost: cash to build. zone: factory zone required. pos: layout offset (studs) from plot center.
+
+local Machines = {}
+
+Machines.list = {
+	{
+		id = "forge", name = "Ember Forge", produces = "cash", baseRate = 1, unlockCost = 0, zone = 1,
+		upBase = 12, upGrowth = 1.19, element = "ember", color = Color3.fromRGB(255, 120, 60), pos = { -14, -10 },
+		desc = "Smelts scrap into cash. Your starting machine.",
+	},
+	{
+		id = "press", name = "Hydraulic Press", produces = "cash", baseRate = 7, unlockCost = 350, zone = 1,
+		upBase = 250, upGrowth = 1.19, element = "stone", color = Color3.fromRGB(170, 150, 120), pos = { 14, -10 },
+		desc = "Slow, heavy and profitable.",
+	},
+	{
+		id = "biolab", name = "Bio-Lab", produces = "biomass", baseRate = 0.4, unlockCost = 4000, zone = 2,
+		upBase = 1800, upGrowth = 1.20, element = "bio", color = Color3.fromRGB(120, 220, 90), pos = { -14, 14 },
+		desc = "Grows Biomass for creature levels and fusion.",
+	},
+	{
+		id = "reactor", name = "Core Reactor", produces = "cores", baseRate = 0.03, unlockCost = 15000, zone = 2,
+		upBase = 12000, upGrowth = 1.20, element = "arc", color = Color3.fromRGB(90, 200, 255), pos = { 14, 14 },
+		desc = "Condenses Cores used by the Research tree.",
+	},
+	{
+		id = "chamber", name = "Mutation Chamber", produces = "biomass", baseRate = 1.5, unlockCost = 400000, zone = 3,
+		upBase = 150000, upGrowth = 1.20, element = "void", color = Color3.fromRGB(160, 90, 255), pos = { -34, 2 },
+		luckPerLevel = 0.01, luckCap = 1.0,
+		desc = "Produces Biomass and raises mutation luck with every level.",
+	},
+	{
+		id = "quantum", name = "Quantum Assembler", produces = "cash", baseRate = 900, unlockCost = 40000000, zone = 4,
+		upBase = 15000000, upGrowth = 1.21, element = "arc", color = Color3.fromRGB(255, 255, 255), pos = { 34, 2 },
+		desc = "Assembles cash out of probability.",
+	},
+}
+
+Machines.byId = {} :: { [string]: any }
+for _, m in ipairs(Machines.list) do
+	Machines.byId[m.id] = m
+end
+
+-- Factory zones (expandable floors). Zone 1 is free and owned from the start.
+Machines.zones = {
+	{ id = 1, name = "Starter Floor", cost = 0, size = { 56, 40 } },
+	{ id = 2, name = "Mezzanine Wing", cost = 5000, size = { 56, 66 } },
+	{ id = 3, name = "Genetics Annex", cost = 300000, size = { 96, 66 } },
+	{ id = 4, name = "Sky Deck", cost = 25000000, size = { 96, 66 } },
+}
+
+return Machines
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX8"><Properties><string name="Name">Monetization</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Optional Robux items. IDs of 0 are "not configured": the shop hides them and purchases are refused.
+-- Fill in real IDs from the Creator Dashboard. Nothing here sells raw progression power:
+--   * gamepasses are convenience (inventory) or cosmetic (themes)
+--   * the Supporter pack gives cosmetics + a flat cash gift that is small relative to a few minutes of play.
+
+local Monetization = {}
+
+Monetization.gamepasses = {
+	{ key = "invPlus", id = 0, name = "Roomy Barn", desc = "+60 creature inventory slots.", kind = "convenience" },
+	{ key = "theme_neon", id = 0, name = "Neon Factory Theme", desc = "Cosmetic: neon trim on your plot.", kind = "cosmetic" },
+	{ key = "theme_gold", id = 0, name = "Gilded Factory Theme", desc = "Cosmetic: gold plating on your plot.", kind = "cosmetic" },
+}
+
+Monetization.products = {
+	{ key = "supporter", id = 0, name = "Supporter Pack", desc = "Cosmetic Sparkle Aura on your creatures + 5 Cores. Thank you!", grant = { cores = 5 }, flag = "fx_sparkle" },
+}
+
+Monetization.themes = {
+	default = { name = "Classic Steel", trim = Color3.fromRGB(70, 80, 95), accent = Color3.fromRGB(255, 190, 70), material = "Metal", requires = nil },
+	neon = { name = "Neon", trim = Color3.fromRGB(20, 20, 40), accent = Color3.fromRGB(0, 255, 220), material = "Neon", requires = "theme_neon" },
+	gold = { name = "Gilded", trim = Color3.fromRGB(215, 170, 50), accent = Color3.fromRGB(255, 240, 160), material = "Foil", requires = "theme_gold" },
+}
+
+return Monetization
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX9"><Properties><string name="Name">Prestige</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Rebirth upgrades bought with Echoes. level scaling: cost = base * growth^level.
+-- kind drives how Stats/Engine interpret `perLevel`.
+
+local Prestige = {}
+
+Prestige.upgrades = {
+	{ id = "r_cash", name = "Echo Engine", kind = "cashMult", perLevel = 0.25, max = 25, base = 1, growth = 1.5, desc = "+25% cash per level." },
+	{ id = "r_start", name = "Seed Capital", kind = "startCash", perLevel = 500, max = 15, base = 1, growth = 1.45, desc = "Start each run with 500 x level² cash." },
+	{ id = "r_luck", name = "Mutagen Memory", kind = "mutationLuck", perLevel = 0.10, max = 10, base = 2, growth = 1.6, desc = "+10% mutation luck per level." },
+	{ id = "r_cores", name = "Core Memory", kind = "coreMult", perLevel = 0.20, max = 15, base = 2, growth = 1.5, desc = "+20% cores per level." },
+	{ id = "r_slots", name = "Residual Slots", kind = "slotBonus", perLevel = 1, max = 2, base = 12, growth = 4, desc = "+1 creature slot on every machine per level." },
+	{ id = "r_zone", name = "Keep Foundations", kind = "startZone", perLevel = 1, max = 2, base = 6, growth = 5, desc = "Rebirth keeps your factory floors: start on zone 2, then zone 3." },
+}
+
+Prestige.byId = {} :: { [string]: any }
+for _, u in ipairs(Prestige.upgrades) do
+	Prestige.byId[u.id] = u
+end
+
+return Prestige
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX10"><Properties><string name="Name">Quests</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Quest / achievement / event framework data. Progress is derived from profile stats:
+--   Quests.getStat(profile, statName)  -> number
+-- kinds: tutorial (ordered, absolute), daily (rolled per UTC day, delta), repeat (delta, resets on claim),
+--        milestone (absolute, one-time claim). Achievements auto-grant when `stat >= target`.
+-- Rewards deliberately span resources that need different parts of the game (cores, biomass, echoes).
+
+local Creatures = require(script.Parent.Creatures)
+
+local Quests = {}
+
+Quests.tutorial = {
+	{ id = "t1", name = "Power Up", desc = "Upgrade the Ember Forge 3 times.", stat = "machineUpgrades", target = 3, reward = { cash = 100 }, hint = "Open Factory (F) and press Upgrade, or walk to the forge and use its prompt." },
+	{ id = "t2", name = "Hatch Your First Egg", desc = "Buy and hatch a Scrap Egg.", stat = "hatched", target = 1, reward = { cash = 150 }, hint = "Open Eggs and buy a Scrap Egg." },
+	{ id = "t3", name = "Put Them To Work", desc = "Assign a creature to a machine.", stat = "assignments", target = 1, reward = { cash = 250 }, hint = "Open Creatures, pick a creature and press Assign. Matching elements work at full power." },
+	{ id = "t4", name = "Expand Your Business", desc = "Build the Hydraulic Press.", stat = "machinesBuilt", target = 2, reward = { cash = 500 }, hint = "Open Factory and build the Hydraulic Press." },
+	{ id = "t5", name = "Grow Your Collection", desc = "Discover 4 creature variants.", stat = "discoveries", target = 4, reward = { cash = 1000 }, hint = "Hatch more eggs. Open the Index to see what's undiscovered." },
+	{ id = "t6", name = "Open the Mezzanine", desc = "Expand the factory to zone 2.", stat = "zone", target = 2, reward = { biomass = 40 }, hint = "Open Factory and expand to the Mezzanine Wing." },
+	{ id = "t7", name = "Fuse Something New", desc = "Perform a fusion.", stat = "fused", target = 1, reward = { biomass = 40, cores = 2 }, hint = "Open Eggs > Fusion. Three of the same common creature fuse into an Uncommon." },
+	{ id = "t8", name = "Think Ahead", desc = "Buy your first research.", stat = "researchBought", target = 1, reward = { cores = 5 }, hint = "Build the Core Reactor to produce Cores, then open Research." },
+	{ id = "t9", name = "The Big Reset", desc = "Complete a rebirth.", stat = "rebirths", target = 1, reward = { echoes = 2 }, hint = "Open Rebirth to see requirements. Resets are explained before you confirm." },
+}
+
+Quests.daily = {
+	{ id = "d_hatch", name = "Egg Day", desc = "Hatch 8 eggs.", stat = "hatched", target = 8, reward = { cash = 2500, biomass = 20 } },
+	{ id = "d_upgrade", name = "Maintenance Crew", desc = "Upgrade machines 15 times.", stat = "machineUpgrades", target = 15, reward = { cash = 3000, cores = 1 } },
+	{ id = "d_fuse", name = "Mad Scientist", desc = "Perform 2 fusions.", stat = "fused", target = 2, reward = { biomass = 40, cores = 2 } },
+	{ id = "d_level", name = "Training Day", desc = "Level up creatures 10 times.", stat = "creatureLevels", target = 10, reward = { cash = 2000, biomass = 30 } },
+	{ id = "d_cash", name = "Cash Flow", desc = "Earn 50,000 cash.", stat = "cashEarned", target = 50000, reward = { cores = 2, biomass = 25 } },
+	{ id = "d_research", name = "Lab Work", desc = "Buy 1 research node.", stat = "researchBought", target = 1, reward = { cash = 5000, cores = 2 } },
+	{ id = "d_discover", name = "Field Notes", desc = "Discover 1 new creature variant.", stat = "discoveries", target = 1, reward = { cash = 4000, cores = 2 } },
+}
+Quests.DailyCount = 3
+
+Quests.repeatable = {
+	{ id = "r_hatch", name = "Hatchery Regular", desc = "Hatch 25 eggs.", stat = "hatched", target = 25, reward = { cash = 10000, biomass = 50 } },
+	{ id = "r_upgrade", name = "Never Stop Upgrading", desc = "Upgrade machines 50 times.", stat = "machineUpgrades", target = 50, reward = { cash = 15000, cores = 3 } },
+}
+
+Quests.milestones = {
+	{ id = "m_zone3", name = "Genetics Annex", desc = "Reach factory zone 3.", stat = "zone", target = 3, reward = { cores = 10 } },
+	{ id = "m_zone4", name = "Sky High", desc = "Reach factory zone 4.", stat = "zone", target = 4, reward = { cores = 40 } },
+	{ id = "m_disc10", name = "Naturalist", desc = "Discover 10 variants.", stat = "discoveries", target = 10, reward = { cash = 25000, cores = 5 } },
+	{ id = "m_disc25", name = "Taxonomist", desc = "Discover 25 variants.", stat = "discoveries", target = 25, reward = { cash = 500000, cores = 20 } },
+	{ id = "m_machine50", name = "Fully Loaded", desc = "Get any machine to level 50.", stat = "maxMachineLevel", target = 50, reward = { cash = 100000, biomass = 200 } },
+	{ id = "m_reb3", name = "Cycle of Rebirth", desc = "Rebirth 3 times.", stat = "rebirths", target = 3, reward = { echoes = 5 } },
+	{ id = "m_research10", name = "Researcher", desc = "Buy 10 research nodes.", stat = "researchBought", target = 10, reward = { cores = 25 } },
+}
+
+Quests.achievements = {
+	{ id = "a_first_egg", name = "Cracked It", desc = "Hatch your first egg.", stat = "hatched", target = 1, reward = { cash = 100 } },
+	{ id = "a_eggs100", name = "Egg Enthusiast", desc = "Hatch 100 eggs.", stat = "hatched", target = 100, reward = { cash = 50000, biomass = 100 } },
+	{ id = "a_eggs1000", name = "Omelette Maker", desc = "Hatch 1,000 eggs.", stat = "hatched", target = 1000, reward = { cores = 100 } },
+	{ id = "a_rich", name = "Millionaire", desc = "Earn 1,000,000 cash in total.", stat = "cashEarned", target = 1e6, reward = { cores = 5 } },
+	{ id = "a_rich2", name = "Billionaire", desc = "Earn 1e9 cash in total.", stat = "cashEarned", target = 1e9, reward = { cores = 50 } },
+	{ id = "a_fuse10", name = "Splice Master", desc = "Perform 10 fusions.", stat = "fused", target = 10, reward = { biomass = 300 } },
+	{ id = "a_mutant", name = "Mutant!", desc = "Own a creature with a Golden or better mutation.", stat = "bestMutation", target = 3, reward = { cores = 10 } },
+	{ id = "a_mythic", name = "Eclipse Rising", desc = "Fuse an Eclipse Leviathan.", stat = "mythics", target = 1, reward = { echoes = 10 } },
+	{ id = "a_reb1", name = "Reborn", desc = "Rebirth once.", stat = "rebirths", target = 1, reward = { cores = 5 } },
+	{ id = "a_reb10", name = "Eternal", desc = "Rebirth 10 times.", stat = "rebirths", target = 10, reward = { echoes = 25 } },
+}
+
+Quests.byId = {} :: { [string]: any }
+for _, group in ipairs({ Quests.tutorial, Quests.daily, Quests.repeatable, Quests.milestones, Quests.achievements }) do
+	for _, q in ipairs(group) do
+		Quests.byId[q.id] = q
+	end
+end
+
+-- Limited-duration events: active when (day since epoch) % cycleDays falls in [startDay, startDay+durationDays).
+-- effects: mutationLuck / cashMult / biomassMult / coreMult additive bonuses while active.
+Quests.events = {
+	{ id = "mutation_surge", name = "Mutation Surge", desc = "Mutation luck +100% while the Surge lasts!", cycleDays = 7, startDay = 2, durationDays = 1, effects = { mutationLuck = 1.0 } },
+	{ id = "gold_rush", name = "Gold Rush", desc = "All cash production +50%!", cycleDays = 7, startDay = 5, durationDays = 1, effects = { cashMult = 0.5 } },
+	{ id = "bio_bloom", name = "Bio Bloom", desc = "Biomass +50% and Cores +25%!", cycleDays = 14, startDay = 9, durationDays = 2, effects = { biomassMult = 0.5, coreMult = 0.25 } },
+}
+
+--- Active event for a unix time (or nil).
+function Quests.activeEvent(now: number): any?
+	local day = math.floor(now / 86400)
+	for _, e in ipairs(Quests.events) do
+		local pos = (day - e.startDay) % e.cycleDays
+		if pos < e.durationDays then
+			local endsAt = (day - pos + e.durationDays) * 86400
+			return { id = e.id, name = e.name, desc = e.desc, effects = e.effects, endsAt = endsAt }
+		end
+	end
+	return nil
+end
+
+--- Reads a numeric progress stat from a profile (derived stats computed on demand).
+function Quests.getStat(p: any, stat: string): number
+	if stat == "zone" then
+		return p.zone
+	elseif stat == "discoveries" then
+		local n = 0
+		for _ in pairs(p.discovered) do
+			n += 1
+		end
+		return n
+	elseif stat == "maxMachineLevel" then
+		local best = 0
+		for _, m in pairs(p.machines) do
+			if m.level > best then
+				best = m.level
+			end
+		end
+		return best
+	elseif stat == "bestMutation" then
+		local best = 1
+		for _, c in pairs(p.creatures) do
+			local idx = Creatures.mutationIndex[c.mut] or 1
+			if idx > best then
+				best = idx
+			end
+		end
+		return best
+	elseif stat == "rebirths" then
+		return p.rebirths
+	end
+	return p.stats[stat] or 0
+end
+
+--- Picks the daily quest ids for a given UTC day number (deterministic, shared by all players).
+function Quests.rollDaily(dayNumber: number): { string }
+	local pool = {}
+	for i, q in ipairs(Quests.daily) do
+		pool[i] = q.id
+	end
+	local rng = Random.new(dayNumber * 7919 + 13)
+	local picked = {}
+	for _ = 1, math.min(Quests.DailyCount, #pool) do
+		local i = rng:NextInteger(1, #pool)
+		table.insert(picked, table.remove(pool, i))
+	end
+	return picked
+end
+
+return Quests
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX11"><Properties><string name="Name">Remotes</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Network surface. The server creates these instances; the client waits for them.
+-- Client -> server goes through ONE RemoteFunction ("Request") with a whitelisted action name;
+-- server -> client uses the RemoteEvents below. Nothing else is exposed.
+
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Remotes = {}
+
+Remotes.events = { "Sync", "Tick", "Notify", "Announce", "Leaderboards" }
+Remotes.functions = { "Request" }
+
+--- Server: create. Client: wait.
+function Remotes.get(): { [string]: any }
+	local out: { [string]: any } = {}
+	local folder: Instance
+	if RunService:IsServer() then
+		folder = Instance.new("Folder")
+		folder.Name = "Remotes"
+		for _, n in ipairs(Remotes.events) do
+			local e = Instance.new("RemoteEvent")
+			e.Name = n
+			e.Parent = folder
+			out[n] = e
+		end
+		for _, n in ipairs(Remotes.functions) do
+			local f = Instance.new("RemoteFunction")
+			f.Name = n
+			f.Parent = folder
+			out[n] = f
+		end
+		folder.Parent = ReplicatedStorage
+	else
+		folder = ReplicatedStorage:WaitForChild("Remotes")
+		for _, n in ipairs(Remotes.events) do
+			out[n] = folder:WaitForChild(n)
+		end
+		for _, n in ipairs(Remotes.functions) do
+			out[n] = folder:WaitForChild(n)
+		end
+	end
+	return out
+end
+
+return Remotes
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX12"><Properties><string name="Name">Research</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Research tree. Cost in cores. requires = all of; anyOf = at least one of; exclusive = locks out these nodes.
+-- effects keys (additive unless noted): cashMult biomassMult coreMult creaturePower mutationLuck
+--   upgradeDiscount fusionDiscount echoMult slotBonus offlineHours machineMult.<id>
+--   flags: autoUpgrade autoAssign (booleans)
+
+local Research = {}
+
+Research.branches = {
+	{ id = "industrial", name = "Industrial Production", color = Color3.fromRGB(255, 150, 70) },
+	{ id = "evolution", name = "Creature Evolution", color = Color3.fromRGB(190, 110, 255) },
+	{ id = "automation", name = "Automation", color = Color3.fromRGB(90, 200, 255) },
+	{ id = "efficiency", name = "Resource Efficiency", color = Color3.fromRGB(120, 220, 120) },
+	{ id = "dimensional", name = "Dimensional Technology", color = Color3.fromRGB(255, 110, 180) },
+}
+
+Research.nodes = {
+	-- Industrial
+	{ id = "ind1", branch = "industrial", name = "Better Bearings", cost = 5, desc = "+10% cash from all sources.", effects = { cashMult = 0.10 } },
+	{ id = "ind2", branch = "industrial", name = "Overclocked Forges", cost = 20, requires = { "ind1" }, desc = "Ember Forge output +50%.", effects = { ["machineMult.forge"] = 0.5 } },
+	{ id = "ind3a", branch = "industrial", name = "Mass Production", cost = 80, requires = { "ind2" }, exclusive = { "ind3b" }, desc = "+35% cash. Excludes Precision Engineering.", effects = { cashMult = 0.35 } },
+	{ id = "ind3b", branch = "industrial", name = "Precision Engineering", cost = 80, requires = { "ind2" }, exclusive = { "ind3a" }, desc = "+15% cash and -8% upgrade costs. Excludes Mass Production.", effects = { cashMult = 0.15, upgradeDiscount = 0.08 } },
+	{ id = "ind4", branch = "industrial", name = "Quantum Foundry", cost = 400, anyOf = { "ind3a", "ind3b" }, desc = "Hydraulic Press output +100%.", effects = { ["machineMult.press"] = 1.0 } },
+	{ id = "ind5", branch = "industrial", name = "Industrial Singularity", cost = 2000, requires = { "ind4" }, desc = "+75% cash.", effects = { cashMult = 0.75 } },
+	-- Evolution
+	{ id = "evo1", branch = "evolution", name = "Gene Splicing", cost = 8, desc = "+25% mutation luck.", effects = { mutationLuck = 0.25 } },
+	{ id = "evo2", branch = "evolution", name = "Efficient Fusion", cost = 30, requires = { "evo1" }, desc = "-25% fusion Biomass cost.", effects = { fusionDiscount = 0.25 } },
+	{ id = "evo3a", branch = "evolution", name = "Hardy Lineages", cost = 100, requires = { "evo2" }, exclusive = { "evo3b" }, desc = "+20% creature power. Excludes Wild Genes.", effects = { creaturePower = 0.20 } },
+	{ id = "evo3b", branch = "evolution", name = "Wild Genes", cost = 100, requires = { "evo2" }, exclusive = { "evo3a" }, desc = "+60% mutation luck. Excludes Hardy Lineages.", effects = { mutationLuck = 0.60 } },
+	{ id = "evo4", branch = "evolution", name = "Apex Breeding", cost = 500, anyOf = { "evo3a", "evo3b" }, desc = "+30% creature power.", effects = { creaturePower = 0.30 } },
+	-- Automation
+	{ id = "aut1", branch = "automation", name = "Night Shift", cost = 15, desc = "+2 hours of offline production.", effects = { offlineHours = 2 } },
+	{ id = "aut2", branch = "automation", name = "Auto-Upgrader", cost = 60, requires = { "aut1" }, desc = "Unlocks a toggle that automatically buys the cheapest machine upgrade.", effects = { autoUpgrade = true } },
+	{ id = "aut3", branch = "automation", name = "Smart Assignment", cost = 200, requires = { "aut2" }, desc = "Unlocks one-click 'Optimize Assignments'.", effects = { autoAssign = true } },
+	{ id = "aut4", branch = "automation", name = "Deep Storage", cost = 600, requires = { "aut3" }, desc = "+6 hours of offline production.", effects = { offlineHours = 6 } },
+	-- Efficiency
+	{ id = "eff1", branch = "efficiency", name = "Resource Recycling", cost = 10, desc = "+25% Biomass.", effects = { biomassMult = 0.25 } },
+	{ id = "eff2", branch = "efficiency", name = "Core Compression", cost = 40, requires = { "eff1" }, desc = "+25% Cores.", effects = { coreMult = 0.25 } },
+	{ id = "eff3", branch = "efficiency", name = "Bulk Contracts", cost = 120, requires = { "eff1" }, desc = "-7% upgrade costs.", effects = { upgradeDiscount = 0.07 } },
+	{ id = "eff4", branch = "efficiency", name = "Extra Bays", cost = 250, requires = { "eff2", "eff3" }, desc = "+1 creature slot on every machine.", effects = { slotBonus = 1 } },
+	{ id = "eff5", branch = "efficiency", name = "Lean Manufacturing", cost = 900, requires = { "eff4" }, desc = "-10% upgrade costs.", effects = { upgradeDiscount = 0.10 } },
+	-- Dimensional
+	{ id = "dim1", branch = "dimensional", name = "Echo Tuning", cost = 50, requires = { "ind1" }, desc = "+15% Echoes from rebirth.", effects = { echoMult = 0.15 } },
+	{ id = "dim2", branch = "dimensional", name = "Resonant Rebirth", cost = 300, requires = { "dim1" }, desc = "+25% Echoes from rebirth.", effects = { echoMult = 0.25 } },
+	{ id = "dim3", branch = "dimensional", name = "Rift Mapping", cost = 1500, requires = { "dim2" }, desc = "Unlocks Rift Eggs. Foundation for future Dimensions.", effects = { cashMult = 0.25 } },
+}
+
+-- Global multiplier on every node cost, to retune pacing in one place.
+Research.costScale = 6
+
+Research.byId = {} :: { [string]: any }
+for _, n in ipairs(Research.nodes) do
+	n.cost = n.cost * Research.costScale
+	Research.byId[n.id] = n
+end
+
+return Research
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX13"><Properties><string name="Name">Stats</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Derives every multiplier and production rate from a profile. Pure: the server uses it for
+-- authoritative production; the client uses the same function to display exact rates.
+
+local Config = require(script.Parent.Config)
+local Creatures = require(script.Parent.Creatures)
+local Machines = require(script.Parent.Machines)
+local Research = require(script.Parent.Research)
+local Prestige = require(script.Parent.Prestige)
+local Formulas = require(script.Parent.Formulas)
+
+local Stats = {}
+
+--- Effective power of one creature instance (before compatibility).
+function Stats.creaturePower(c: any, creaturePowerBonus: number): number
+	local def = Creatures.byId[c.sp]
+	local mut = Creatures.mutations[Creatures.mutationIndex[c.mut] or 1]
+	local trait = Creatures.traitById[c.trait] or Creatures.traitById.none
+	return def.power * Formulas.creatureLevelMult(c.lvl) * mut.mult * trait.powerMult * (1 + creaturePowerBonus)
+end
+
+function Stats.compute(p: any, event: any?): any
+	local s = {
+		cashMult = 1,
+		biomassMult = 1,
+		coreMult = 1,
+		mutationLuck = 0,
+		upgradeDiscount = 0,
+		fusionDiscount = 0,
+		creaturePower = 0,
+		echoMult = 0,
+		offlineHours = Config.BaseOfflineHours,
+		slotBonus = 0,
+		machineMult = {} :: { [string]: number },
+		flags = { autoUpgrade = false, autoAssign = false },
+		machines = {} :: { [string]: any },
+		rates = { cash = 0, biomass = 0, cores = 0 },
+	}
+
+	local function addEffect(key: string, value: any)
+		if type(value) == "boolean" then
+			s.flags[key] = value or s.flags[key]
+		elseif key:sub(1, 12) == "machineMult." then
+			local id = key:sub(13)
+			s.machineMult[id] = (s.machineMult[id] or 0) + value
+		elseif key == "cashMult" or key == "biomassMult" or key == "coreMult" or key == "mutationLuck"
+			or key == "upgradeDiscount" or key == "fusionDiscount" or key == "creaturePower"
+			or key == "echoMult" or key == "offlineHours" or key == "slotBonus" then
+			s[key] += value
+		end
+	end
+
+	for id in pairs(p.research) do
+		local node = Research.byId[id]
+		if node then
+			for k, v in pairs(node.effects) do
+				addEffect(k, v)
+			end
+		end
+	end
+	for id, lvl in pairs(p.prestige) do
+		local u = Prestige.byId[id]
+		if u and lvl > 0 then
+			if u.kind == "cashMult" or u.kind == "mutationLuck" or u.kind == "coreMult" or u.kind == "slotBonus" then
+				addEffect(u.kind, u.perLevel * lvl)
+			end
+		end
+	end
+	s.cashMult += p.echoesEarned * Config.EchoPassiveBonus
+	if event then
+		for k, v in pairs(event.effects) do
+			addEffect(k, v)
+		end
+	end
+
+	-- assigned creatures: group per machine in stable uid order
+	local perMachine: { [string]: { string } } = {}
+	for uid, c in pairs(p.creatures) do
+		if c.mach then
+			local list = perMachine[c.mach]
+			if not list then
+				list = {}
+				perMachine[c.mach] = list
+			end
+			table.insert(list, uid)
+		end
+	end
+
+	local passiveCash, passiveBio, passiveCore = 0, 0, 0
+	local discountFromCreatures = 0
+	for _, def in ipairs(Machines.list) do
+		local m = p.machines[def.id]
+		if m then
+			local slots = Formulas.baseSlots(m.level) + s.slotBonus
+			local uids = perMachine[def.id] or {}
+			table.sort(uids)
+			local power = 0
+			local used = {}
+			for i, uid in ipairs(uids) do
+				if i > slots then
+					break
+				end
+				local c = p.creatures[uid]
+				local cdef = Creatures.byId[c.sp]
+				local compat = if cdef.element == def.element then 1 else Config.IncompatibleEfficiency
+				power += Stats.creaturePower(c, s.creaturePower) * compat
+				table.insert(used, uid)
+				local trait = Creatures.traitById[c.trait]
+				if trait then
+					s.mutationLuck += trait.luck
+				end
+				if cdef.passive then
+					for k, v in pairs(cdef.passive) do
+						if k == "cashMult" then
+							passiveCash += v
+						elseif k == "biomassMult" then
+							passiveBio += v
+						elseif k == "coreMult" then
+							passiveCore += v
+						elseif k == "mutationLuck" then
+							s.mutationLuck += v
+						elseif k == "upgradeDiscount" then
+							discountFromCreatures += v
+						end
+					end
+				end
+			end
+			if def.luckPerLevel then
+				s.mutationLuck += math.min(def.luckCap or 1, def.luckPerLevel * m.level)
+			end
+			s.machines[def.id] = { slots = slots, power = power, assigned = used, level = m.level }
+		end
+	end
+	s.cashMult += passiveCash
+	s.biomassMult += passiveBio
+	s.coreMult += passiveCore
+	s.upgradeDiscount = math.min(Config.MaxUpgradeDiscount, s.upgradeDiscount + discountFromCreatures)
+	s.fusionDiscount = math.min(0.8, s.fusionDiscount)
+
+	local globalMult = { cash = s.cashMult, biomass = s.biomassMult, cores = s.coreMult }
+	for _, def in ipairs(Machines.list) do
+		local info = s.machines[def.id]
+		if info then
+			local rate = def.baseRate * Formulas.machineLevelMult(info.level) * (1 + info.power)
+				* (1 + (s.machineMult[def.id] or 0)) * (globalMult[def.produces] or 1)
+			info.rate = rate
+			s.rates[def.produces] += rate
+		end
+	end
+
+	s.invCap = Config.BaseInventory + (if p.owned and p.owned.invPlus then Config.GamepassInventoryBonus else 0)
+	return s
+end
+
+return Stats
+]]></ProtectedString></Properties></Item></Item></Item><Item class="ServerScriptService" referent="RBX28"><Properties><string name="Name">ServerScriptService</string></Properties><Item class="Folder" referent="RBX27"><Properties><string name="Name">Server</string></Properties><Item class="Folder" referent="RBX18"><Properties><string name="Name">Logic</string></Properties><Item class="ModuleScript" referent="RBX16"><Properties><string name="Name">Engine</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Pure, Roblox-service-free game rules. Every state change a player can cause goes through here.
+-- Functions take the player profile `p` and a ctx = { now: number, rng: Random-like, notify: ((string, any) -> ())? }
+-- and return (ok: boolean, message: string, data: any?).
+-- Being pure, this module is unit-tested outside Roblox (see tests/).
+
+local S = require(script.Parent.Shared)
+local Config, Creatures, Machines, Research, Prestige, Quests, Formulas, Stats =
+	S.Config, S.Creatures, S.Machines, S.Research, S.Prestige, S.Quests, S.Formulas, S.Stats
+
+local Engine = {}
+
+export type Ctx = { now: number, rng: any, notify: ((string, any) -> ())? }
+
+local RESOURCES = { cash = true, biomass = true, cores = true, echoes = true }
+
+local function notify(ctx: Ctx, kind: string, data: any)
+	if ctx.notify then
+		ctx.notify(kind, data)
+	end
+end
+
+local function fail(msg: string): (boolean, string, any?)
+	return false, msg, nil
+end
+
+----------------------------------------------------------------------------------------------------
+-- Profile lifecycle
+----------------------------------------------------------------------------------------------------
+
+function Engine.newProfile(now: number): any
+	local p = {
+		version = Config.DataVersion,
+		cash = Config.StartCash, biomass = 0, cores = 0, echoes = 0, echoesEarned = 0,
+		runCash = 0, lifetimeCash = 0,
+		zone = 1,
+		machines = { forge = { level = 1 } },
+		creatures = {},
+		nextUid = 1,
+		discovered = {},
+		research = {},
+		prestige = {},
+		rebirths = 0,
+		stats = {
+			hatched = 0, fused = 0, machineUpgrades = 0, machinesBuilt = 1, assignments = 0,
+			creatureLevels = 0, researchBought = 0, cashEarned = 0, mythics = 0,
+		},
+		tutorial = 1,
+		quests = { claimed = {}, repeatBase = {}, daily = { day = 0, ids = {}, base = {}, claimed = {} } },
+		achievements = {},
+		settings = { autoUpgrade = false, notifications = true },
+		pity = 0,
+		eggsRun = 0,
+		lastSeen = now,
+		receipts = {},
+		owned = {},
+		theme = "default",
+	}
+	-- starter creature (assigned to the starter forge)
+	local ctx: Ctx = { now = now, rng = Random.new(1) }
+	local uid = Engine._addCreature(p, Creatures.StarterCreature, "normal", "none", ctx, true)
+	p.creatures[uid].mach = "forge"
+	return p
+end
+
+--- Fills any missing fields so old saves keep loading as the schema grows.
+function Engine.migrate(p: any, now: number): any
+	local fresh = Engine.newProfile(now)
+	local function fill(dst: any, src: any)
+		for k, v in pairs(src) do
+			if dst[k] == nil then
+				dst[k] = if type(v) == "table" then table.clone(v) else v
+			elseif type(v) == "table" and type(dst[k]) == "table" and k ~= "creatures" and k ~= "discovered" then
+				fill(dst[k], v)
+			end
+		end
+	end
+	if p.creatures == nil then
+		p.creatures = {}
+	end
+	fill(p, fresh)
+	-- drop references to content that no longer exists
+	for uid, c in pairs(p.creatures) do
+		if not Creatures.byId[c.sp] then
+			p.creatures[uid] = nil
+		else
+			if not Creatures.mutationIndex[c.mut] then c.mut = "normal" end
+			if not Creatures.traitById[c.trait] then c.trait = "none" end
+			c.lvl = math.clamp(math.floor(c.lvl or 1), 1, Config.CreatureMaxLevel)
+			if c.mach and not Machines.byId[c.mach] then c.mach = nil end
+		end
+	end
+	for id in pairs(p.machines) do
+		if not Machines.byId[id] then
+			p.machines[id] = nil
+		end
+	end
+	if p.machines.forge == nil then
+		p.machines.forge = { level = 1 }
+	end
+	for _, res in ipairs({ "cash", "biomass", "cores", "echoes", "echoesEarned", "runCash", "lifetimeCash" }) do
+		local v = p[res]
+		if type(v) ~= "number" or v ~= v then
+			p[res] = 0
+		end
+		p[res] = math.clamp(p[res], 0, Config.MaxValue)
+	end
+	p.version = Config.DataVersion
+	return p
+end
+
+----------------------------------------------------------------------------------------------------
+-- Stats cache
+----------------------------------------------------------------------------------------------------
+
+--- Returns cached derived stats, recomputing when invalidated or when the live event changed.
+function Engine.stats(p: any, now: number): any
+	local ev = Quests.activeEvent(now)
+	local evId = if ev then ev.id else ""
+	if p._stats == nil or p._statsEvent ~= evId then
+		p._stats = Stats.compute(p, ev)
+		p._statsEvent = evId
+		p._event = ev
+	end
+	return p._stats
+end
+
+function Engine.invalidate(p: any)
+	p._stats = nil
+end
+
+local function stats(p: any, ctx: Ctx): any
+	return Engine.stats(p, ctx.now)
+end
+
+----------------------------------------------------------------------------------------------------
+-- Resources
+----------------------------------------------------------------------------------------------------
+
+function Engine.add(p: any, res: string, amount: number)
+	assert(RESOURCES[res], "unknown resource")
+	p[res] = math.clamp(p[res] + amount, 0, Config.MaxValue)
+end
+
+local function spend(p: any, res: string, amount: number): boolean
+	if amount ~= amount or amount < 0 or not (p[res] >= amount) then
+		return false
+	end
+	p[res] -= amount
+	return true
+end
+
+function Engine.grantReward(p: any, reward: { [string]: number }, ctx: Ctx)
+	for res, amt in pairs(reward) do
+		if RESOURCES[res] then
+			Engine.add(p, res, amt)
+			if res == "echoes" then
+				p.echoesEarned += amt
+			end
+		end
+	end
+	Engine.invalidate(p)
+	notify(ctx, "reward", reward)
+end
+
+--- Advances production by dt seconds. Returns gains.
+function Engine.tick(p: any, dt: number, ctx: Ctx): { [string]: number }
+	local st = stats(p, ctx)
+	local gains = { cash = st.rates.cash * dt, biomass = st.rates.biomass * dt, cores = st.rates.cores * dt }
+	local before = p.cash
+	Engine.add(p, "cash", gains.cash)
+	Engine.add(p, "biomass", gains.biomass)
+	Engine.add(p, "cores", gains.cores)
+	local cashGained = p.cash - before
+	if cashGained > 0 then
+		p.runCash = math.min(Config.MaxValue, p.runCash + gains.cash)
+		p.lifetimeCash = math.min(Config.MaxValue, p.lifetimeCash + gains.cash)
+		p.stats.cashEarned = math.min(Config.MaxValue, p.stats.cashEarned + gains.cash)
+	end
+	return gains
+end
+
+--- Offline progress on join. Returns summary or nil.
+function Engine.applyOffline(p: any, ctx: Ctx): any?
+	local st = stats(p, ctx)
+	local away = ctx.now - (p.lastSeen or ctx.now)
+	local cap = st.offlineHours * 3600
+	local sec = math.min(away, cap)
+	if sec < 120 then
+		return nil
+	end
+	local eff = Config.OfflineEfficiency
+	local gains = Engine.tick(p, sec * eff, ctx)
+	return { seconds = sec, gains = gains, capped = away > cap }
+end
+
+----------------------------------------------------------------------------------------------------
+-- Machines & factory
+----------------------------------------------------------------------------------------------------
+
+function Engine.buyMachine(p: any, id: any, ctx: Ctx): (boolean, string, any?)
+	local def = if type(id) == "string" then Machines.byId[id] else nil
+	if not def then return fail("Unknown machine") end
+	if p.machines[def.id] then return fail("Already built") end
+	if p.zone < def.zone then return fail("Requires " .. Machines.zones[def.zone].name) end
+	if not spend(p, "cash", def.unlockCost) then return fail("Not enough cash") end
+	p.machines[def.id] = { level = 1 }
+	p.stats.machinesBuilt += 1
+	Engine.invalidate(p)
+	notify(ctx, "toast", { text = def.name .. " built!", kind = "good" })
+	return true, "Built " .. def.name
+end
+
+function Engine.upgradeMachine(p: any, id: any, count: any, ctx: Ctx): (boolean, string, any?)
+	local m = if type(id) == "string" then p.machines[id] else nil
+	if not m then return fail("Machine not built") end
+	local n = if type(count) == "number" then math.clamp(math.floor(count), 1, 100) else 1
+	if m.level >= Config.MachineMaxLevel then return fail("Max level") end
+	local st = stats(p, ctx)
+	local total, bought = Formulas.upgradeBulk(id, m.level, st.upgradeDiscount, p.cash, n)
+	if bought == 0 then return fail("Not enough cash") end
+	if not spend(p, "cash", total) then return fail("Not enough cash") end
+	m.level += bought
+	p.stats.machineUpgrades += bought
+	Engine.invalidate(p)
+	return true, string.format("%s +%d", Machines.byId[id].name, bought), { bought = bought }
+end
+
+function Engine.expandZone(p: any, ctx: Ctx): (boolean, string, any?)
+	local nextZone = p.zone + 1
+	local z = Machines.zones[nextZone]
+	if not z then return fail("Factory fully expanded") end
+	if not spend(p, "cash", z.cost) then return fail("Not enough cash") end
+	p.zone = nextZone
+	Engine.invalidate(p)
+	notify(ctx, "toast", { text = "Unlocked " .. z.name .. "!", kind = "good" })
+	return true, "Expanded: " .. z.name
+end
+
+--- Cheapest affordable upgrade step, used by the Auto-Upgrader research.
+function Engine.autoUpgradeStep(p: any, ctx: Ctx): boolean
+	local st = stats(p, ctx)
+	if not (p.settings.autoUpgrade and st.flags.autoUpgrade) then return false end
+	local bestId, bestCost
+	for id, m in pairs(p.machines) do
+		if m.level < Config.MachineMaxLevel then
+			local c = Formulas.upgradeCost(id, m.level, st.upgradeDiscount)
+			if c <= p.cash and (bestCost == nil or c < bestCost) then
+				bestId, bestCost = id, c
+			end
+		end
+	end
+	if bestId then
+		return (Engine.upgradeMachine(p, bestId, 1, ctx))
+	end
+	return false
+end
+
+----------------------------------------------------------------------------------------------------
+-- Creatures
+----------------------------------------------------------------------------------------------------
+
+local function creatureCount(p: any): number
+	local n = 0
+	for _ in pairs(p.creatures) do n += 1 end
+	return n
+end
+Engine.creatureCount = creatureCount
+
+local function rollMutation(luck: number, rng: any): string
+	for i = #Creatures.mutations, 2, -1 do
+		local m = Creatures.mutations[i]
+		if rng:NextNumber() < math.min(0.5, m.chance * (1 + luck)) then
+			return m.id
+		end
+	end
+	return "normal"
+end
+
+local function rollTrait(rng: any): string
+	local total = 0
+	for _, t in ipairs(Creatures.traits) do total += t.weight end
+	local r = rng:NextNumber() * total
+	for _, t in ipairs(Creatures.traits) do
+		r -= t.weight
+		if r <= 0 then return t.id end
+	end
+	return "none"
+end
+
+--- Inserts a creature, records discovery, grants the discovery reward. Returns uid, isNew.
+function Engine._addCreature(p: any, sp: string, mut: string, trait: string, ctx: Ctx, silent: boolean?): (string, boolean)
+	local uid = "c" .. p.nextUid
+	p.nextUid += 1
+	p.creatures[uid] = { sp = sp, mut = mut, trait = trait, lvl = 1 }
+	local key = sp .. ":" .. mut
+	local isNew = not p.discovered[key]
+	if isNew then
+		p.discovered[key] = true
+		local def = Creatures.byId[sp]
+		local mult = if mut ~= "normal" then Creatures.MutationDiscoveryMult else 1
+		local reward = {
+			cash = Creatures.DiscoveryReward.cash[def.rarity] * mult,
+			cores = Creatures.DiscoveryReward.cores[def.rarity] * mult,
+		}
+		if not silent then
+			Engine.grantReward(p, reward, ctx)
+			notify(ctx, "discovery", { sp = sp, mut = mut, reward = reward })
+			local mi = Creatures.mutationIndex[mut]
+			if def.rarity >= 5 or mi >= 4 then
+				notify(ctx, "announce", { sp = sp, mut = mut })
+			end
+		end
+	end
+	if Creatures.byId[sp].rarity == 6 then
+		p.stats.mythics += 1
+	end
+	Engine.invalidate(p)
+	return uid, isNew
+end
+
+local function rollRarity(egg: any, p: any, rng: any): number
+	local total = 0
+	for _, w in ipairs(egg.weights) do total += w end
+	local r = rng:NextNumber() * total
+	local rarity = #egg.weights
+	for i, w in ipairs(egg.weights) do
+		r -= w
+		if r <= 0 and w > 0 then
+			rarity = i
+			break
+		end
+	end
+	-- pity: guarantee at least Rare once the counter fills, if this egg can produce it
+	if p.pity >= Config.PityThreshold - 1 and rarity < Config.PityMinRarity and #egg.weights >= Config.PityMinRarity then
+		local pool = {}
+		for i = Config.PityMinRarity, #egg.weights do
+			if egg.weights[i] > 0 then table.insert(pool, i) end
+		end
+		if #pool > 0 then rarity = pool[1] end
+	end
+	return rarity
+end
+
+function Engine.buyEgg(p: any, eggId: any, ctx: Ctx): (boolean, string, any?)
+	local egg = if type(eggId) == "string" then Creatures.eggById[eggId] else nil
+	if not egg then return fail("Unknown egg") end
+	if p.zone < egg.zone then return fail("Requires " .. Machines.zones[egg.zone].name) end
+	if egg.requiresResearch and not p.research[egg.requiresResearch] then
+		return fail("Requires research: " .. Research.byId[egg.requiresResearch].name)
+	end
+	local st = stats(p, ctx)
+	if creatureCount(p) >= st.invCap then return fail("Inventory full - fuse or release creatures") end
+	if not spend(p, egg.currency, Formulas.eggCost(egg, p.eggsRun)) then return fail("Not enough " .. egg.currency) end
+
+	local rarity = rollRarity(egg, p, ctx.rng)
+	if rarity >= Config.PityMinRarity then p.pity = 0 else p.pity += 1 end
+	local pool = {}
+	for _, c in ipairs(Creatures.list) do
+		if c.rarity == rarity then table.insert(pool, c) end
+	end
+	local species = pool[ctx.rng:NextInteger(1, #pool)]
+	local mut = rollMutation(st.mutationLuck, ctx.rng)
+	local trait = rollTrait(ctx.rng)
+	local uid, isNew = Engine._addCreature(p, species.id, mut, trait, ctx)
+	p.stats.hatched += 1
+	p.eggsRun += 1
+	return true, "Hatched " .. species.name, { uid = uid, sp = species.id, mut = mut, trait = trait, isNew = isNew }
+end
+
+function Engine.levelCreature(p: any, uid: any, ctx: Ctx): (boolean, string, any?)
+	local c = if type(uid) == "string" then p.creatures[uid] else nil
+	if not c then return fail("Unknown creature") end
+	if c.lvl >= Config.CreatureMaxLevel then return fail("Max level") end
+	local cost = Formulas.creatureLevelCost(Creatures.byId[c.sp].rarity, c.lvl)
+	if not spend(p, "biomass", cost) then return fail("Not enough biomass") end
+	c.lvl += 1
+	p.stats.creatureLevels += 1
+	Engine.invalidate(p)
+	return true, "Leveled up"
+end
+
+function Engine.assign(p: any, uid: any, machineId: any, ctx: Ctx): (boolean, string, any?)
+	local c = if type(uid) == "string" then p.creatures[uid] else nil
+	if not c then return fail("Unknown creature") end
+	if machineId == nil or machineId == "" then
+		c.mach = nil
+		Engine.invalidate(p)
+		return true, "Unassigned"
+	end
+	local m = if type(machineId) == "string" then p.machines[machineId] else nil
+	if not m then return fail("Machine not built") end
+	if c.mach == machineId then return fail("Already assigned there") end
+	local st = stats(p, ctx)
+	local slots = Formulas.baseSlots(m.level) + st.slotBonus
+	local used = 0
+	for _, o in pairs(p.creatures) do
+		if o.mach == machineId then used += 1 end
+	end
+	if used >= slots then return fail("No free slots (level up the machine for more)") end
+	c.mach = machineId
+	p.stats.assignments += 1
+	Engine.invalidate(p)
+	return true, "Assigned"
+end
+
+local RESOURCE_WEIGHT = { cash = 1, biomass = 3, cores = 40 }
+
+--- One-click assignment optimiser (unlocked by research).
+function Engine.autoAssign(p: any, ctx: Ctx): (boolean, string, any?)
+	local st = stats(p, ctx)
+	if not st.flags.autoAssign then return fail("Research Smart Assignment first") end
+	for _, c in pairs(p.creatures) do c.mach = nil end
+	local pairsList = {}
+	for mid, m in pairs(p.machines) do
+		local def = Machines.byId[mid]
+		local importance = def.baseRate * Formulas.machineLevelMult(m.level) * (RESOURCE_WEIGHT[def.produces] or 1)
+		for uid, c in pairs(p.creatures) do
+			local cdef = Creatures.byId[c.sp]
+			local compat = if cdef.element == def.element then 1 else Config.IncompatibleEfficiency
+			table.insert(pairsList, { uid = uid, mid = mid, v = importance * Stats.creaturePower(c, st.creaturePower) * compat })
+		end
+	end
+	table.sort(pairsList, function(a, b)
+		if a.v ~= b.v then return a.v > b.v end
+		if a.uid ~= b.uid then return a.uid < b.uid end
+		return a.mid < b.mid
+	end)
+	local free: { [string]: number } = {}
+	for mid, m in pairs(p.machines) do
+		free[mid] = Formulas.baseSlots(m.level) + st.slotBonus
+	end
+	local placed = 0
+	for _, e in ipairs(pairsList) do
+		if free[e.mid] > 0 and p.creatures[e.uid].mach == nil then
+			p.creatures[e.uid].mach = e.mid
+			free[e.mid] -= 1
+			placed += 1
+		end
+	end
+	Engine.invalidate(p)
+	return true, "Assigned " .. placed .. " creatures"
+end
+
+function Engine.release(p: any, uid: any, ctx: Ctx): (boolean, string, any?)
+	local c = if type(uid) == "string" then p.creatures[uid] else nil
+	if not c then return fail("Unknown creature") end
+	if creatureCount(p) <= 1 then return fail("Keep at least one creature") end
+	local rarity = Creatures.byId[c.sp].rarity
+	local gain = 10 * 4 ^ (rarity - 1) * c.lvl
+	p.creatures[uid] = nil
+	Engine.add(p, "cash", gain)
+	Engine.invalidate(p)
+	return true, "Released for $" .. gain, { cash = gain }
+end
+
+----------------------------------------------------------------------------------------------------
+-- Fusion
+----------------------------------------------------------------------------------------------------
+
+-- cheapest-first: unassigned, lowest level, lowest mutation
+local function inputScore(c: any): number
+	return (if c.mach then 1e6 else 0) + c.lvl * 1000 + (Creatures.mutationIndex[c.mut] or 1) * 10
+end
+
+--- Chooses creatures to feed a recipe (lowest value first). Returns uid list or nil.
+function Engine.pickFusionInputs(p: any, recipe: any): { string }?
+	local picked = {}
+	for sp, need in pairs(recipe.inputs) do
+		local cands = {}
+		for uid, c in pairs(p.creatures) do
+			if c.sp == sp then table.insert(cands, uid) end
+		end
+		if #cands < need then return nil end
+		table.sort(cands, function(a, b)
+			local sa, sb = inputScore(p.creatures[a]), inputScore(p.creatures[b])
+			if sa ~= sb then return sa < sb end
+			return a < b
+		end)
+		for i = 1, need do table.insert(picked, cands[i]) end
+	end
+	return picked
+end
+
+function Engine.fuse(p: any, recipeId: any, uids: any, ctx: Ctx): (boolean, string, any?)
+	local recipe = if type(recipeId) == "string" then Creatures.recipeById[recipeId] else nil
+	if not recipe then return fail("Unknown recipe") end
+	local list
+	if uids == nil then
+		list = Engine.pickFusionInputs(p, recipe)
+		if not list then return fail("Missing ingredients") end
+	else
+		if type(uids) ~= "table" then return fail("Bad request") end
+		list = uids
+	end
+	-- validate: exact multiset, distinct, owned
+	local need = {}
+	local totalNeed = 0
+	for sp, n in pairs(recipe.inputs) do need[sp] = n totalNeed += n end
+	if #list ~= totalNeed then return fail("Wrong number of ingredients") end
+	local seen = {}
+	local bestMut = 1
+	for _, uid in ipairs(list) do
+		if type(uid) ~= "string" or seen[uid] then return fail("Invalid ingredients") end
+		seen[uid] = true
+		local c = p.creatures[uid]
+		if not c then return fail("Unknown creature in ingredients") end
+		if not need[c.sp] or need[c.sp] <= 0 then return fail("Ingredients do not match recipe") end
+		need[c.sp] -= 1
+		bestMut = math.max(bestMut, Creatures.mutationIndex[c.mut])
+	end
+	local st = stats(p, ctx)
+	local cost = math.ceil(recipe.cost * (1 - st.fusionDiscount))
+	if not spend(p, "biomass", cost) then return fail("Not enough biomass (" .. cost .. ")") end
+	for _, uid in ipairs(list) do p.creatures[uid] = nil end
+
+	-- 50% to inherit the best input mutation, otherwise roll normally (fusion has double luck)
+	local mut = rollMutation(st.mutationLuck * 2 + 0.5, ctx.rng)
+	if ctx.rng:NextNumber() < 0.5 and bestMut > (Creatures.mutationIndex[mut] or 1) then
+		mut = Creatures.mutations[bestMut].id
+	end
+	local trait = rollTrait(ctx.rng)
+	Engine.invalidate(p)
+	local uid, isNew = Engine._addCreature(p, recipe.result, mut, trait, ctx)
+	p.stats.fused += 1
+	return true, "Fused " .. Creatures.byId[recipe.result].name, { uid = uid, sp = recipe.result, mut = mut, trait = trait, isNew = isNew }
+end
+
+----------------------------------------------------------------------------------------------------
+-- Research
+----------------------------------------------------------------------------------------------------
+
+--- Returns (available, reason).
+function Engine.researchStatus(p: any, id: string): (boolean, string?)
+	local node = Research.byId[id]
+	if not node then return false, "Unknown" end
+	if p.research[id] then return false, "Owned" end
+	for _, ex in ipairs(node.exclusive or {}) do
+		if p.research[ex] then return false, "Locked out by " .. Research.byId[ex].name end
+	end
+	for _, r in ipairs(node.requires or {}) do
+		if not p.research[r] then return false, "Requires " .. Research.byId[r].name end
+	end
+	if node.anyOf then
+		local any = false
+		for _, r in ipairs(node.anyOf) do
+			if p.research[r] then any = true end
+		end
+		if not any then return false, "Requires one of: " .. Research.byId[node.anyOf[1]].name .. " / " .. Research.byId[node.anyOf[2]].name end
+	end
+	return true, nil
+end
+
+function Engine.buyResearch(p: any, id: any, ctx: Ctx): (boolean, string, any?)
+	if type(id) ~= "string" then return fail("Bad request") end
+	local node = Research.byId[id]
+	if not node then return fail("Unknown research") end
+	local ok, why = Engine.researchStatus(p, id)
+	if not ok then return fail(why or "Unavailable") end
+	if not spend(p, "cores", node.cost) then return fail("Not enough cores") end
+	p.research[id] = true
+	p.stats.researchBought += 1
+	Engine.invalidate(p)
+	notify(ctx, "toast", { text = "Researched " .. node.name, kind = "good" })
+	return true, "Researched " .. node.name
+end
+
+----------------------------------------------------------------------------------------------------
+-- Rebirth
+----------------------------------------------------------------------------------------------------
+
+function Engine.prestigeLevel(p: any, id: string): number
+	return p.prestige[id] or 0
+end
+
+function Engine.rebirthPreview(p: any, ctx: Ctx): any
+	local st = stats(p, ctx)
+	local req = Formulas.rebirthRequirement(p.rebirths)
+	local gain = Formulas.echoGain(p.runCash, st.echoMult)
+	local can, reason = true, nil
+	if p.zone < Config.Rebirth.minZone then
+		can, reason = false, "Expand to " .. Machines.zones[Config.Rebirth.minZone].name .. " first"
+	elseif p.runCash < req then
+		can, reason = false, "Earn more cash this run"
+	elseif gain < 1 then
+		can, reason = false, "Would not grant any Echoes yet"
+	end
+	return { can = can, reason = reason, requirement = req, runCash = p.runCash, gain = gain, rebirths = p.rebirths }
+end
+
+function Engine.rebirth(p: any, confirm: any, ctx: Ctx): (boolean, string, any?)
+	if confirm ~= true then return fail("Confirmation required") end
+	local prev = Engine.rebirthPreview(p, ctx)
+	if not prev.can then return fail(prev.reason or "Cannot rebirth yet") end
+
+	local startCashLvl = Engine.prestigeLevel(p, "r_start")
+	local startZoneLvl = Engine.prestigeLevel(p, "r_zone")
+	p.echoes += prev.gain
+	p.echoesEarned += prev.gain
+	p.rebirths += 1
+	p.cash = Config.StartCash + Prestige.byId.r_start.perLevel * startCashLvl * startCashLvl
+	p.biomass = 0
+	p.runCash = 0
+	p.zone = 1 + startZoneLvl
+	p.machines = { forge = { level = 1 } }
+	p.stats.machinesBuilt = 1
+	p.pity = 0
+	p.eggsRun = 0
+	for _, c in pairs(p.creatures) do
+		c.lvl = 1
+		c.mach = nil
+	end
+	-- re-seat the best matching creature on the forge so a new run is never stalled
+	local bestUid, bestV
+	for uid, c in pairs(p.creatures) do
+		local v = Stats.creaturePower(c, 0) * (if Creatures.byId[c.sp].element == "ember" then 1 else Config.IncompatibleEfficiency)
+		if bestV == nil or v > bestV then bestUid, bestV = uid, v end
+	end
+	if bestUid then p.creatures[bestUid].mach = "forge" end
+	Engine.invalidate(p)
+	notify(ctx, "toast", { text = "Rebirth complete! +" .. prev.gain .. " Echoes", kind = "good" })
+	return true, "Reborn", { gain = prev.gain }
+end
+
+function Engine.buyPrestige(p: any, id: any, ctx: Ctx): (boolean, string, any?)
+	local u = if type(id) == "string" then Prestige.byId[id] else nil
+	if not u then return fail("Unknown upgrade") end
+	local lvl = Engine.prestigeLevel(p, id)
+	if lvl >= u.max then return fail("Max level") end
+	if not spend(p, "echoes", Formulas.prestigeCost(u, lvl)) then return fail("Not enough echoes") end
+	p.prestige[id] = lvl + 1
+	Engine.invalidate(p)
+	return true, u.name .. " " .. (lvl + 1)
+end
+
+----------------------------------------------------------------------------------------------------
+-- Quests & achievements
+----------------------------------------------------------------------------------------------------
+
+function Engine.refreshDaily(p: any, now: number)
+	local day = math.floor(now / 86400)
+	local d = p.quests.daily
+	if d.day ~= day then
+		d.day = day
+		d.ids = Quests.rollDaily(day)
+		d.base = {}
+		d.claimed = {}
+		for _, id in ipairs(d.ids) do
+			d.base[id] = Quests.getStat(p, Quests.byId[id].stat)
+		end
+	end
+end
+
+function Engine.claimQuest(p: any, id: any, ctx: Ctx): (boolean, string, any?)
+	local q = if type(id) == "string" then Quests.byId[id] else nil
+	if not q then return fail("Unknown quest") end
+	Engine.refreshDaily(p, ctx.now)
+	local cur = Quests.getStat(p, q.stat)
+	local qs = p.quests
+	local function done(base: number): boolean
+		return cur - base >= q.target
+	end
+	local kindOk = false
+	if Quests.tutorial[p.tutorial] and Quests.tutorial[p.tutorial].id == id then
+		if cur < q.target then return fail("Not complete yet") end
+		p.tutorial += 1
+		kindOk = true
+	elseif table.find(qs.daily.ids, id) then
+		if qs.daily.claimed[id] then return fail("Already claimed") end
+		if not done(qs.daily.base[id] or 0) then return fail("Not complete yet") end
+		qs.daily.claimed[id] = true
+		kindOk = true
+	elseif table.find(Quests.repeatable, q) then
+		local base = qs.repeatBase[id] or 0
+		if not done(base) then return fail("Not complete yet") end
+		qs.repeatBase[id] = base + q.target
+		kindOk = true
+	elseif table.find(Quests.milestones, q) then
+		if qs.claimed[id] then return fail("Already claimed") end
+		if cur < q.target then return fail("Not complete yet") end
+		qs.claimed[id] = true
+		kindOk = true
+	end
+	if not kindOk then return fail("Quest not available") end
+	Engine.grantReward(p, q.reward, ctx)
+	return true, "Claimed " .. q.name, { reward = q.reward }
+end
+
+--- Auto-grants any newly met achievements. Returns list of unlocked ids.
+function Engine.checkAchievements(p: any, ctx: Ctx): { string }
+	local unlocked = {}
+	for _, a in ipairs(Quests.achievements) do
+		if not p.achievements[a.id] and Quests.getStat(p, a.stat) >= a.target then
+			p.achievements[a.id] = true
+			table.insert(unlocked, a.id)
+			Engine.grantReward(p, a.reward, ctx)
+			notify(ctx, "achievement", { id = a.id, name = a.name, reward = a.reward })
+		end
+	end
+	return unlocked
+end
+
+----------------------------------------------------------------------------------------------------
+-- Settings / cosmetics
+----------------------------------------------------------------------------------------------------
+
+function Engine.setSetting(p: any, key: any, value: any, ctx: Ctx): (boolean, string, any?)
+	if type(value) ~= "boolean" then return fail("Bad value") end
+	if key ~= "autoUpgrade" and key ~= "notifications" then return fail("Unknown setting") end
+	if key == "autoUpgrade" and value and not stats(p, ctx).flags.autoUpgrade then
+		return fail("Research Auto-Upgrader first")
+	end
+	p.settings[key] = value
+	return true, "Saved"
+end
+
+function Engine.setTheme(p: any, theme: any, ctx: Ctx): (boolean, string, any?)
+	local def = if type(theme) == "string" then S.Monetization.themes[theme] else nil
+	if not def then return fail("Unknown theme") end
+	if def.requires and not p.owned[def.requires] then return fail("Theme not owned") end
+	p.theme = theme
+	return true, "Theme set"
+end
+
+return Engine
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX17"><Properties><string name="Name">Shared</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Single place where server code reaches the shared (ReplicatedStorage) modules.
+-- tools/stage_tests.py replaces this file with a flat-require stub for out-of-Roblox unit tests.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+
+return {
+	Config = require(Shared:WaitForChild("Config")),
+	Creatures = require(Shared:WaitForChild("Creatures")),
+	Machines = require(Shared:WaitForChild("Machines")),
+	Research = require(Shared:WaitForChild("Research")),
+	Prestige = require(Shared:WaitForChild("Prestige")),
+	Quests = require(Shared:WaitForChild("Quests")),
+	Formulas = require(Shared:WaitForChild("Formulas")),
+	Stats = require(Shared:WaitForChild("Stats")),
+	Monetization = require(Shared:WaitForChild("Monetization")),
+	Format = require(Shared:WaitForChild("Format")),
+}
+]]></ProtectedString></Properties></Item></Item><Item class="Script" referent="RBX19"><Properties><string name="Name">Main</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+-- ECLIPSE: INFINITE EMPIRE - server bootstrap and main loop.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Remotes = require(Shared:WaitForChild("Remotes"))
+local Config = require(Shared:WaitForChild("Config"))
+local Quests = require(Shared:WaitForChild("Quests"))
+
+local Services = script.Parent:WaitForChild("Services")
+local Engine = require(script.Parent:WaitForChild("Logic"):WaitForChild("Engine"))
+local DataService = require(Services:WaitForChild("DataService"))
+local PlotService = require(Services:WaitForChild("PlotService"))
+local Session = require(Services:WaitForChild("Session"))
+local Router = require(Services:WaitForChild("Router"))
+local PurchaseService = require(Services:WaitForChild("PurchaseService"))
+local LeaderboardService = require(Services:WaitForChild("LeaderboardService"))
+
+local remotes = Remotes.get()
+Session.init(remotes)
+PlotService.init()
+PlotService.setPromptHandler(Router.onPrompt)
+Router.init(remotes)
+DataService.start()
+PurchaseService.start()
+
+local lastTick: { [Player]: number } = {}
+local loading: { [Player]: boolean } = {}
+
+local function placeCharacter(player: Player)
+	local cf = PlotService.spawnCFrame(player)
+	local char = player.Character
+	if cf and char then
+		char:WaitForChild("HumanoidRootPart", 10)
+		char:PivotTo(cf)
+	end
+end
+
+local function onPlayerAdded(player: Player)
+	if loading[player] then
+		return
+	end
+	loading[player] = true
+	PlotService.assign(player)
+	player.CharacterAdded:Connect(function()
+		task.defer(placeCharacter, player)
+	end)
+
+	local p, err = DataService.load(player)
+	if not p then
+		if player.Parent then
+			player:Kick("We couldn't load your save safely (" .. tostring(err) .. "). Please rejoin in a minute - your progress is protected.")
+		end
+		loading[player] = nil
+		return
+	end
+	if player.Parent == nil then
+		DataService.release(player)
+		return
+	end
+
+	local ctx = Session.ctx(player)
+	Engine.refreshDaily(p, ctx.now)
+	PurchaseService.refreshOwnership(player, p)
+	local off = Engine.applyOffline(p, ctx)
+	lastTick[player] = os.clock()
+	Engine.checkAchievements(p, ctx)
+	Session.sync(player)
+	Session.updateLeaderstats(player, p)
+	if off then
+		Session.notify(player, "offline", off)
+	end
+	if player.Character then
+		task.defer(placeCharacter, player)
+	end
+	loading[player] = nil
+end
+
+local function onPlayerRemoving(player: Player)
+	local p = DataService.get(player)
+	if p then
+		LeaderboardService.forget(player)
+		LeaderboardService.write(player, p)
+	end
+	DataService.release(player)
+	PlotService.release(player)
+	Session.forget(player)
+	lastTick[player] = nil
+	loading[player] = nil
+end
+
+Players.PlayerAdded:Connect(onPlayerAdded)
+Players.PlayerRemoving:Connect(onPlayerRemoving)
+for _, plr in ipairs(Players:GetPlayers()) do
+	task.spawn(onPlayerAdded, plr)
+end
+
+-- Main production loop: ONE heartbeat accumulator for all players (no per-player/per-machine loops).
+local accum = 0
+local flushAccum = 0
+local autoAccum = 0
+local lastEventId = ""
+RunService.Heartbeat:Connect(function(dt)
+	accum += dt
+	flushAccum += dt
+	if flushAccum >= 0.1 then
+		flushAccum = 0
+		Session.flush()
+	end
+	if accum < Config.TickSeconds then
+		return
+	end
+	local step = accum
+	accum = 0
+	autoAccum += 1
+	local autoStep = autoAccum % 2 == 0
+
+	for player, p in pairs(DataService.all()) do
+		local ctx = Session.ctx(player)
+		local elapsed = math.min(os.clock() - (lastTick[player] or os.clock()), 10)
+		lastTick[player] = os.clock()
+		Engine.tick(p, math.max(elapsed, step), ctx)
+		if autoStep and Engine.autoUpgradeStep(p, ctx) then
+			Session.dirty(player)
+		end
+		if autoAccum % 5 == 0 then
+			if #Engine.checkAchievements(p, ctx) > 0 then
+				Session.dirty(player)
+			end
+			Session.updateLeaderstats(player, p)
+		end
+		remotes.Tick:FireClient(player, { cash = p.cash, biomass = p.biomass, cores = p.cores, echoes = p.echoes, runCash = p.runCash })
+	end
+
+	-- live-event transitions
+	if autoAccum % 10 == 0 then
+		local ev = Quests.activeEvent(os.time())
+		local id = if ev then ev.id else ""
+		if id ~= lastEventId then
+			lastEventId = id
+			if ev then
+				Session.announceServer("EVENT: " .. ev.name .. " - " .. ev.desc, "event")
+			end
+			for player in pairs(DataService.all()) do
+				Session.dirty(player)
+			end
+		end
+	end
+end)
+
+-- Leaderboards: write own scores / refresh the cached top lists on a slow timer.
+task.spawn(function()
+	LeaderboardService.refresh()
+	while true do
+		task.wait(Config.LeaderboardReadSeconds)
+		for player, p in pairs(DataService.all()) do
+			LeaderboardService.write(player, p)
+		end
+		LeaderboardService.refresh()
+	end
+end)
+]]></ProtectedString></Properties></Item><Item class="Folder" referent="RBX26"><Properties><string name="Name">Services</string></Properties><Item class="ModuleScript" referent="RBX20"><Properties><string name="Name">DataService</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Persistence: session-locked DataStore profiles with retries, autosave and shutdown saving.
+-- Profile shape lives in Logic/Engine.lua (newProfile / migrate). Keys starting with "_" are runtime-only.
+
+local DataStoreService = game:GetService("DataStoreService")
+local RunService = game:GetService("RunService")
+
+local Config = require(script.Parent.Parent.Logic.Shared).Config
+local Engine = require(script.Parent.Parent.Logic.Engine)
+
+local STORE_NAME = "EclipseEmpire_Profiles_v1"
+local LOCK_TIMEOUT = 150 -- seconds before an abandoned session lock is considered dead
+-- fail fast in Studio (API access is often off there); retry patiently in live servers
+local MAX_LOAD_ATTEMPTS = if RunService:IsStudio() then 2 else 8
+
+
+local DataService = {}
+
+local store = DataStoreService:GetDataStore(STORE_NAME)
+local profiles: { [Player]: any } = {}
+local saving: { [Player]: boolean } = {}
+local ephemeral: { [Player]: boolean } = {} -- Studio fallback when DataStores are unavailable
+
+local function keyFor(userId: number): string
+	return "P_" .. userId
+end
+
+--- Deep copy without runtime-only ("_"-prefixed) keys, safe for DataStore serialisation.
+local function serialize(v: any): any
+	if type(v) ~= "table" then
+		return v
+	end
+	local out = {}
+	for k, x in pairs(v) do
+		if not (type(k) == "string" and k:sub(1, 1) == "_") then
+			out[k] = serialize(x)
+		end
+	end
+	return out
+end
+DataService.serialize = serialize
+
+local function backoff(attempt: number)
+	task.wait(math.min(2 ^ attempt, 12))
+end
+
+--- Loads (and session-locks) a player's profile. Returns profile or nil + reason.
+function DataService.load(player: Player): (any?, string?)
+	local key = keyFor(player.UserId)
+	local lastErr = "unknown"
+	for attempt = 1, MAX_LOAD_ATTEMPTS do
+		if player.Parent == nil then
+			return nil, "left"
+		end
+		local lockedByOther = false
+		local ok, result = pcall(function()
+			return store:UpdateAsync(key, function(old: any)
+				local now = os.time()
+				old = old or {}
+				local lock = old.lock
+				if lock and lock.job ~= game.JobId and now - lock.t < LOCK_TIMEOUT then
+					lockedByOther = true
+					return nil -- cancel: another live server owns this profile
+				end
+				old.lock = { job = game.JobId, t = now }
+				return old
+			end)
+		end)
+		if ok and result and result.lock and result.lock.job == game.JobId then
+			local now = os.time()
+			local p
+			if result.data then
+				p = Engine.migrate(result.data, now)
+			else
+				p = Engine.newProfile(now)
+			end
+			profiles[player] = p
+			return p, nil
+		elseif ok and lockedByOther then
+			lastErr = "locked"
+		else
+			lastErr = tostring(result)
+		end
+		backoff(attempt)
+	end
+
+	if RunService:IsStudio() and lastErr ~= "locked" then
+		warn("[DataService] DataStore unavailable in Studio (" .. lastErr .. "). Using a temporary profile - progress will NOT be saved.")
+		local p = Engine.newProfile(os.time())
+		profiles[player] = p
+		ephemeral[player] = true
+		return p, nil
+	end
+	return nil, lastErr
+end
+
+function DataService.get(player: Player): any?
+	return profiles[player]
+end
+
+function DataService.all(): { [Player]: any }
+	return profiles
+end
+
+--- Saves a profile. release=true also drops the session lock. Returns success.
+function DataService.save(player: Player, release: boolean?): boolean
+	local p = profiles[player]
+	if not p or ephemeral[player] then
+		return ephemeral[player] == true
+	end
+	if saving[player] then
+		return false -- a save is already in flight for this player
+	end
+	saving[player] = true
+	p.lastSeen = os.time()
+	local snapshot = serialize(p)
+	local success = false
+	for attempt = 1, 4 do
+		local ok, err = pcall(function()
+			store:UpdateAsync(keyFor(player.UserId), function(old: any)
+				old = old or {}
+				if old.lock and old.lock.job ~= game.JobId and os.time() - old.lock.t < LOCK_TIMEOUT then
+					error("session lock lost") -- never overwrite a profile another server owns
+				end
+				old.data = snapshot
+				old.savedAt = os.time()
+				old.lock = if release then nil else { job = game.JobId, t = os.time() }
+				return old
+			end)
+		end)
+		if ok then
+			success = true
+			break
+		end
+		warn(string.format("[DataService] save attempt %d failed for %s: %s", attempt, player.Name, tostring(err)))
+		if tostring(err):find("session lock lost") then
+			break
+		end
+		backoff(attempt)
+	end
+	saving[player] = nil
+	return success
+end
+
+--- Saves, then forgets the player's profile (call on PlayerRemoving).
+function DataService.release(player: Player)
+	DataService.save(player, true)
+	profiles[player] = nil
+	ephemeral[player] = nil
+end
+
+function DataService.start()
+	-- autosave, staggered so requests don't burst
+	task.spawn(function()
+		while true do
+			task.wait(Config.AutoSaveSeconds)
+			local list = {}
+			for player in pairs(profiles) do
+				table.insert(list, player)
+			end
+			for _, player in ipairs(list) do
+				if profiles[player] then
+					task.spawn(DataService.save, player, false)
+				end
+				task.wait(math.min(2, Config.AutoSaveSeconds / math.max(#list, 1)))
+			end
+		end
+	end)
+
+	game:BindToClose(function()
+		if RunService:IsStudio() then
+			task.wait(0.2)
+		end
+		local pending = 0
+		for player in pairs(profiles) do
+			pending += 1
+			task.spawn(function()
+				DataService.save(player, true)
+				pending -= 1
+			end)
+		end
+		local deadline = os.clock() + 25
+		while pending > 0 and os.clock() < deadline do
+			task.wait(0.1)
+		end
+	end)
+end
+
+return DataService
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX21"><Properties><string name="Name">LeaderboardService</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Global leaderboards via OrderedDataStores. Writes are throttled; reads are cached and broadcast.
+
+local DataStoreService = game:GetService("DataStoreService")
+local Players = game:GetService("Players")
+
+local Shared = require(script.Parent.Parent.Logic.Shared)
+local Config, Quests = Shared.Config, Shared.Quests
+
+local LeaderboardService = {}
+
+LeaderboardService.boards = {
+	{ id = "cash", name = "Lifetime Cash", store = "LB_LifetimeCash_v1", value = function(p: any): number return math.floor(p.lifetimeCash) end },
+	{ id = "rebirths", name = "Rebirths", store = "LB_Rebirths_v1", value = function(p: any): number return p.rebirths end },
+	{ id = "collection", name = "Collection", store = "LB_Collection_v1", value = function(p: any): number return Quests.getStat(p, "discoveries") end },
+}
+
+local stores: { [string]: OrderedDataStore } = {}
+for _, b in ipairs(LeaderboardService.boards) do
+	stores[b.id] = DataStoreService:GetOrderedDataStore(b.store)
+end
+
+local cache: { [string]: { { name: string, userId: number, value: number } } } = {}
+local nameCache: { [number]: string } = {}
+local lastWrite: { [Player]: number } = {}
+
+local function nameFor(userId: number): string
+	if nameCache[userId] then
+		return nameCache[userId]
+	end
+	local ok, name = pcall(function()
+		return Players:GetNameFromUserIdAsync(userId)
+	end)
+	nameCache[userId] = if ok then name else ("User " .. userId)
+	return nameCache[userId]
+end
+
+function LeaderboardService.write(player: Player, p: any)
+	local last = lastWrite[player]
+	if last and os.clock() - last < Config.LeaderboardWriteSeconds * 0.9 then
+		return
+	end
+	lastWrite[player] = os.clock()
+	for _, b in ipairs(LeaderboardService.boards) do
+		local v = math.clamp(b.value(p), 0, Config.MaxValue)
+		if v > 0 then
+			local ok, err = pcall(function()
+				stores[b.id]:SetAsync(tostring(player.UserId), v)
+			end)
+			if not ok then
+				warn("[Leaderboard] write failed: " .. tostring(err))
+			end
+		end
+	end
+end
+
+function LeaderboardService.forget(player: Player)
+	lastWrite[player] = nil
+end
+
+function LeaderboardService.refresh()
+	for _, b in ipairs(LeaderboardService.boards) do
+		local ok, pages = pcall(function()
+			return stores[b.id]:GetSortedAsync(false, Config.LeaderboardSize)
+		end)
+		if ok then
+			local rows = {}
+			for _, entry in ipairs(pages:GetCurrentPage()) do
+				local userId = tonumber(entry.key)
+				if userId then
+					table.insert(rows, { name = nameFor(userId), userId = userId, value = entry.value })
+				end
+			end
+			cache[b.id] = rows
+		else
+			warn("[Leaderboard] read failed: " .. tostring(pages))
+		end
+	end
+end
+
+function LeaderboardService.snapshot(): any
+	local out = {}
+	for _, b in ipairs(LeaderboardService.boards) do
+		table.insert(out, { id = b.id, name = b.name, rows = cache[b.id] or {} })
+	end
+	return out
+end
+
+return LeaderboardService
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX22"><Properties><string name="Name">PlotService</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Builds and maintains each player's procedural factory plot. Purely presentational: it reads the
+-- (server-authoritative) profile and never changes it. Prompt interactions are forwarded to a callback
+-- that goes through the same Engine validation as any remote request.
+
+local Players = game:GetService("Players")
+
+local Shared = require(script.Parent.Parent.Logic.Shared)
+local Config, Creatures, Machines, Monetization, Format =
+	Shared.Config, Shared.Creatures, Shared.Machines, Shared.Monetization, Shared.Format
+
+local PlotService = {}
+
+local SPACING = 170
+local COLUMNS = 4
+
+type PlotState = {
+	index: number,
+	model: Model,
+	origin: Vector3,
+	structSig: string,
+	machines: { [string]: { model: Model, petSig: string, label: TextLabel, prompt: ProximityPrompt, builtSig: string } },
+}
+
+local plots: { [Player]: PlotState } = {}
+local used: { [number]: boolean } = {}
+local plotsFolder: Folder
+local promptHandler: ((Player, string) -> ())? = nil
+
+function PlotService.setPromptHandler(fn: (Player, string) -> ())
+	promptHandler = fn
+end
+
+local function part(parent: Instance, name: string, size: Vector3, cf: CFrame, color: Color3, material: Enum.Material?, shape: Enum.PartType?): Part
+	local p = Instance.new("Part")
+	p.Name = name
+	p.Anchored = true
+	p.Size = size
+	p.CFrame = cf
+	p.Color = color
+	p.Material = material or Enum.Material.SmoothPlastic
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	if shape then
+		p.Shape = shape
+	end
+	p.Parent = parent
+	return p
+end
+
+local function billboard(adornee: BasePart, offset: Vector3, width: number, height: number): TextLabel
+	local gui = Instance.new("BillboardGui")
+	gui.Size = UDim2.fromOffset(width, height)
+	gui.StudsOffset = offset
+	gui.AlwaysOnTop = false
+	gui.MaxDistance = 120
+	gui.Adornee = adornee
+	gui.Parent = adornee
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 0.25
+	label.BackgroundColor3 = Color3.fromRGB(15, 18, 28)
+	label.TextColor3 = Color3.new(1, 1, 1)
+	label.Font = Enum.Font.GothamBold
+	label.TextScaled = true
+	label.RichText = true
+	label.Text = ""
+	label.Parent = gui
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = label
+	return label
+end
+
+local function rarityColor(rarity: number): Color3
+	return Config.Rarities[rarity].color
+end
+
+----------------------------------------------------------------------------------------------------
+
+function PlotService.init()
+	plotsFolder = Instance.new("Folder")
+	plotsFolder.Name = "Plots"
+	plotsFolder.Parent = workspace
+
+	local base = Instance.new("Part")
+	base.Name = "Ground"
+	base.Anchored = true
+	base.Size = Vector3.new(COLUMNS * SPACING + 200, 2, 4 * SPACING + 200)
+	base.CFrame = CFrame.new((COLUMNS - 1) * SPACING / 2, -1.5, (3 * SPACING) / 2)
+	base.Color = Color3.fromRGB(38, 44, 58)
+	base.Material = Enum.Material.Slate
+	base.Parent = workspace
+
+	-- a fallback spawn so characters never fall before being moved to their plot
+	local spawn = Instance.new("SpawnLocation")
+	spawn.Anchored = true
+	spawn.Size = Vector3.new(10, 1, 10)
+	spawn.Position = Vector3.new((COLUMNS - 1) * SPACING / 2, 0.5, -60)
+	spawn.Transparency = 1
+	spawn.CanCollide = false
+	spawn.Neutral = true
+	spawn.Parent = workspace
+end
+
+local function originFor(index: number): Vector3
+	local i = index - 1
+	return Vector3.new((i % COLUMNS) * SPACING, 0, (i // COLUMNS) * SPACING)
+end
+
+function PlotService.assign(player: Player): PlotState
+	local existing = plots[player]
+	if existing then
+		return existing
+	end
+	local index = 1
+	while used[index] do
+		index += 1
+	end
+	used[index] = true
+	local model = Instance.new("Model")
+	model.Name = "Plot_" .. player.UserId
+	model:SetAttribute("OwnerUserId", player.UserId)
+	model.Parent = plotsFolder
+	local state: PlotState = { index = index, model = model, origin = originFor(index), structSig = "", machines = {} }
+	plots[player] = state
+	return state
+end
+
+function PlotService.release(player: Player)
+	local state = plots[player]
+	if state then
+		state.model:Destroy()
+		used[state.index] = nil
+		plots[player] = nil
+	end
+end
+
+function PlotService.spawnCFrame(player: Player): CFrame?
+	local state = plots[player]
+	if not state then
+		return nil
+	end
+	return CFrame.new(state.origin + Vector3.new(0, 4, -34)) * CFrame.Angles(0, math.rad(180), 0)
+end
+
+--- Spot for a visitor (outside the owner's front edge, facing the factory).
+function PlotService.visitorCFrame(owner: Player): CFrame?
+	local state = plots[owner]
+	if not state then
+		return nil
+	end
+	return CFrame.new(state.origin + Vector3.new(0, 4, -46), state.origin + Vector3.new(0, 4, 0))
+end
+
+----------------------------------------------------------------------------------------------------
+-- Structure (floor, railings, decor) rebuilt only when zone/theme change
+----------------------------------------------------------------------------------------------------
+
+local function buildStructure(state: PlotState, zone: number, themeId: string)
+	local old = state.model:FindFirstChild("Structure")
+	if old then
+		old:Destroy()
+	end
+	local theme = Monetization.themes[themeId] or Monetization.themes.default
+	local mat = Enum.Material[theme.material] or Enum.Material.Metal
+	local folder = Instance.new("Folder")
+	folder.Name = "Structure"
+	folder.Parent = state.model
+
+	local size = Machines.zones[zone].size
+	local o = state.origin
+	local floorCol = Color3.fromRGB(58, 64, 80)
+	part(folder, "Floor", Vector3.new(size[1], 1, size[2]), CFrame.new(o + Vector3.new(0, 0.5, 0)), floorCol, Enum.Material.Concrete)
+
+	-- railings
+	local hx, hz = size[1] / 2, size[2] / 2
+	local function rail(name: string, sx: number, sz: number, px: number, pz: number)
+		part(folder, name, Vector3.new(sx, 2, sz), CFrame.new(o + Vector3.new(px, 2, pz)), theme.trim, mat)
+	end
+	rail("RailN", size[1], 0.6, 0, hz)
+	rail("RailS1", size[1] / 2 - 6, 0.6, -(size[1] / 4 + 3), -hz)
+	rail("RailS2", size[1] / 2 - 6, 0.6, size[1] / 4 + 3, -hz)
+	rail("RailE", 0.6, size[2], hx, 0)
+	rail("RailW", 0.6, size[2], -hx, 0)
+
+	-- entrance sign
+	local sign = part(folder, "Sign", Vector3.new(24, 6, 1), CFrame.new(o + Vector3.new(0, 9, -hz)), theme.trim, mat)
+	local owner = Players:GetPlayerByUserId(state.model:GetAttribute("OwnerUserId") :: number)
+	local lbl = billboard(sign, Vector3.new(0, 0, 0), 300, 70)
+	lbl.Text = (if owner then owner.DisplayName else "Factory") .. "'s Empire"
+	lbl.BackgroundTransparency = 1
+	part(folder, "SignPostL", Vector3.new(1, 9, 1), CFrame.new(o + Vector3.new(-11, 4.5, -hz)), theme.trim, mat)
+	part(folder, "SignPostR", Vector3.new(1, 9, 1), CFrame.new(o + Vector3.new(11, 4.5, -hz)), theme.trim, mat)
+
+	-- zone decor: each unlocked zone visibly upgrades the factory
+	if zone >= 2 then
+		for _, sx in ipairs({ -1, 1 }) do
+			for _, sz in ipairs({ -1, 1 }) do
+				local pos = o + Vector3.new(sx * (hx - 2), 0, sz * (hz - 2))
+				part(folder, "Pillar", Vector3.new(1.5, 14, 1.5), CFrame.new(pos + Vector3.new(0, 7, 0)), theme.trim, mat)
+				local lamp = part(folder, "Lamp", Vector3.new(2.5, 2.5, 2.5), CFrame.new(pos + Vector3.new(0, 15, 0)), theme.accent, Enum.Material.Neon, Enum.PartType.Ball)
+				local light = Instance.new("PointLight")
+				light.Range = 26
+				light.Brightness = 1.5
+				light.Color = theme.accent
+				light.Parent = lamp
+			end
+		end
+	end
+	if zone >= 3 then
+		part(folder, "TrimStripN", Vector3.new(size[1] - 4, 0.2, 0.8), CFrame.new(o + Vector3.new(0, 1.1, hz - 3)), theme.accent, Enum.Material.Neon)
+		part(folder, "TrimStripS", Vector3.new(size[1] - 4, 0.2, 0.8), CFrame.new(o + Vector3.new(0, 1.1, -hz + 3)), theme.accent, Enum.Material.Neon)
+		local roof = part(folder, "GlassRoof", Vector3.new(size[1], 1, size[2]), CFrame.new(o + Vector3.new(0, 24, 0)), Color3.fromRGB(150, 200, 255), Enum.Material.Glass)
+		roof.Transparency = 0.8
+		roof.CanCollide = false
+	end
+	if zone >= 4 then
+		local ring = part(folder, "SkyRing", Vector3.new(1, 50, 50), CFrame.new(o + Vector3.new(0, 34, 0)) * CFrame.Angles(0, 0, math.rad(90)), theme.accent, Enum.Material.Neon, Enum.PartType.Cylinder)
+		ring.Transparency = 0.5
+		ring.CanCollide = false
+		local beam = part(folder, "Beacon", Vector3.new(3, 90, 3), CFrame.new(o + Vector3.new(0, 70, 0)), theme.accent, Enum.Material.Neon)
+		beam.Transparency = 0.7
+		beam.CanCollide = false
+	end
+end
+
+----------------------------------------------------------------------------------------------------
+-- Machines
+----------------------------------------------------------------------------------------------------
+
+local function ensureMachine(player: Player, state: PlotState, def: any): any
+	local rec = state.machines[def.id]
+	if rec then
+		return rec
+	end
+	local o = state.origin
+	local model = Instance.new("Model")
+	model.Name = "M_" .. def.id
+	model.Parent = state.model
+	local pos = o + Vector3.new(def.pos[1], 0, def.pos[2])
+	part(model, "Base", Vector3.new(11, 1, 11), CFrame.new(pos + Vector3.new(0, 1.5, 0)), Color3.fromRGB(30, 34, 44), Enum.Material.DiamondPlate)
+	local body = part(model, "Body", Vector3.new(7, 7, 7), CFrame.new(pos + Vector3.new(0, 5.5, 0)), def.color, Enum.Material.Metal)
+	local core = part(model, "Core", Vector3.new(4, 4, 4), CFrame.new(pos + Vector3.new(0, 11, 0)), def.color, Enum.Material.Neon, Enum.PartType.Ball)
+	local light = Instance.new("PointLight")
+	light.Color = def.color
+	light.Range = 18
+	light.Parent = core
+	local label = billboard(body, Vector3.new(0, 7, 0), 240, 66)
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.MaxActivationDistance = 14
+	prompt.RequiresLineOfSight = false
+	prompt.HoldDuration = 0
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.Parent = body
+	prompt.Triggered:Connect(function(who: Player)
+		if who == player and promptHandler then
+			promptHandler(who, def.id)
+		end
+	end)
+	rec = { model = model, petSig = "", label = label, prompt = prompt, builtSig = "" }
+	state.machines[def.id] = rec
+	return rec
+end
+
+local function setGhost(model: Model, ghost: boolean)
+	for _, d in ipairs(model:GetDescendants()) do
+		if d:IsA("BasePart") and d.Name ~= "Base" then
+			d.Transparency = if ghost then 0.75 else 0
+			d.CanCollide = not ghost
+		end
+	end
+end
+
+local function rebuildPets(player: Player, rec: any, def: any, pos: Vector3, p: any, info: any)
+	for _, d in ipairs(rec.model:GetChildren()) do
+		if d.Name == "Pet" then
+			d:Destroy()
+		end
+	end
+	local n = 0
+	for _, uid in ipairs(info.assigned) do
+		local c = p.creatures[uid]
+		local cdef = Creatures.byId[c.sp]
+		local mut = Creatures.mutations[Creatures.mutationIndex[c.mut] or 1]
+		n += 1
+		local angle = (n - 1) * (math.pi / 2.2) + math.pi * 0.35
+		local at = pos + Vector3.new(math.cos(angle) * 8.5, 3.2, math.sin(angle) * 8.5 + 0)
+		local color = if c.mut ~= "normal" then mut.color else rarityColor(cdef.rarity)
+		local pet = part(rec.model, "Pet", Vector3.new(2.6, 2.6, 2.6), CFrame.new(at), color, if c.mut ~= "normal" then Enum.Material.Neon else Enum.Material.SmoothPlastic, Enum.PartType.Ball)
+		pet.CanCollide = false
+		if p.theme and p.owned and p.owned.fx_sparkle then
+			local sp = Instance.new("Sparkles")
+			sp.SparkleColor = color
+			sp.Parent = pet
+		end
+		local lbl = billboard(pet, Vector3.new(0, 2.6, 0), 160, 40)
+		lbl.Text = string.format("<font color='#%s'>%s</font> L%d", rarityColor(cdef.rarity):ToHex(), cdef.name, c.lvl)
+		lbl.TextSize = 14
+	end
+end
+
+--- Syncs the plot with the profile. Cheap when nothing changed.
+function PlotService.update(player: Player, p: any, stats: any)
+	local state = plots[player]
+	if not state then
+		return
+	end
+	local structSig = p.zone .. ":" .. (p.theme or "default")
+	if state.structSig ~= structSig then
+		state.structSig = structSig
+		buildStructure(state, p.zone, p.theme or "default")
+	end
+
+	for _, def in ipairs(Machines.list) do
+		if def.zone <= p.zone then
+			local rec = ensureMachine(player, state, def)
+			local m = p.machines[def.id]
+			local pos = state.origin + Vector3.new(def.pos[1], 0, def.pos[2])
+			local builtSig = if m then "b" else "g"
+			if rec.builtSig ~= builtSig then
+				rec.builtSig = builtSig
+				setGhost(rec.model, m == nil)
+				rec.prompt.ActionText = if m then "Upgrade" else "Build ($" .. Format.number(def.unlockCost) .. ")"
+				rec.prompt.ObjectText = def.name
+				rec.petSig = "" -- force pet refresh
+			end
+			if m then
+				local info = stats.machines[def.id]
+				local text = string.format("%s\n<font color='#9ff'>Lv %d</font> | +%s %s/s", def.name, m.level, Format.rate(info.rate), def.produces)
+				if rec.label.Text ~= text then
+					rec.label.Text = text
+				end
+				local sig = table.concat(info.assigned, ",")
+				for _, uid in ipairs(info.assigned) do
+					local c = p.creatures[uid]
+					sig ..= c.sp .. c.mut .. c.lvl
+				end
+				if sig ~= rec.petSig then
+					rec.petSig = sig
+					rebuildPets(player, rec, def, pos, p, info)
+				end
+			else
+				local text = string.format("%s\nBuild for $%s", def.name, Format.number(def.unlockCost))
+				if rec.label.Text ~= text then
+					rec.label.Text = text
+				end
+				if rec.petSig ~= "ghost" then
+					rec.petSig = "ghost"
+					for _, d in ipairs(rec.model:GetChildren()) do
+						if d.Name == "Pet" then
+							d:Destroy()
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+function PlotService.moveCharacter(player: Player, cf: CFrame?)
+	local char = player.Character
+	if char and cf then
+		char:PivotTo(cf)
+	end
+end
+
+return PlotService
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX23"><Properties><string name="Name">PurchaseService</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Robux purchases. Grants happen ONLY here, on the server, from Roblox's own receipt / pass events.
+-- Items whose id is 0 in Shared/Monetization.lua are treated as "not configured" and cannot be bought.
+
+local MarketplaceService = game:GetService("MarketplaceService")
+local Players = game:GetService("Players")
+
+local Shared = require(script.Parent.Parent.Logic.Shared)
+local Engine = require(script.Parent.Parent.Logic.Engine)
+local Monetization = Shared.Monetization
+local DataService = require(script.Parent.DataService)
+local Session = require(script.Parent.Session)
+
+local PurchaseService = {}
+
+local function passByKey(key: any): any?
+	for _, g in ipairs(Monetization.gamepasses) do
+		if g.key == key then return g end
+	end
+	return nil
+end
+
+local function productByKey(key: any): any?
+	for _, g in ipairs(Monetization.products) do
+		if g.key == key then return g end
+	end
+	return nil
+end
+
+--- Refreshes pass ownership from Roblox (called on join). Safe when ids are unconfigured.
+function PurchaseService.refreshOwnership(player: Player, p: any)
+	for _, g in ipairs(Monetization.gamepasses) do
+		if g.id ~= 0 then
+			local ok, owns = pcall(function()
+				return MarketplaceService:UserOwnsGamePassAsync(player.UserId, g.id)
+			end)
+			if ok and owns then
+				p.owned[g.key] = true
+			end
+		end
+	end
+	Engine.invalidate(p)
+end
+
+--- Called from the validated "buyPass"/"buyProduct" remote actions. Opens Roblox's purchase prompt only.
+function PurchaseService.prompt(player: Player, kind: string, key: any): (boolean, string)
+	if kind == "pass" then
+		local g = passByKey(key)
+		if not g then return false, "Unknown item" end
+		if g.id == 0 then return false, "Not available yet" end
+		MarketplaceService:PromptGamePassPurchase(player, g.id)
+		return true, "Opening purchase..."
+	end
+	local prod = productByKey(key)
+	if not prod then return false, "Unknown item" end
+	if prod.id == 0 then return false, "Not available yet" end
+	MarketplaceService:PromptProductPurchase(player, prod.id)
+	return true, "Opening purchase..."
+end
+
+function PurchaseService.start()
+	MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player: Player, passId: number, wasPurchased: boolean)
+		if not wasPurchased then return end
+		local p = DataService.get(player)
+		if not p then return end
+		for _, g in ipairs(Monetization.gamepasses) do
+			if g.id ~= 0 and g.id == passId then
+				p.owned[g.key] = true
+				Engine.invalidate(p)
+				Session.dirty(player)
+				Session.notify(player, "toast", { text = g.name .. " unlocked. Thank you!", kind = "good" })
+				task.spawn(DataService.save, player, false)
+			end
+		end
+	end)
+
+	MarketplaceService.ProcessReceipt = function(info: any)
+		local player = Players:GetPlayerByUserId(info.PlayerId)
+		if not player then
+			return Enum.ProductPurchaseDecision.NotProcessedYet
+		end
+		local p = DataService.get(player)
+		if not p then
+			return Enum.ProductPurchaseDecision.NotProcessedYet
+		end
+		local receiptKey = tostring(info.PurchaseId)
+		if p.receipts[receiptKey] then
+			return Enum.ProductPurchaseDecision.PurchaseGranted -- already granted: idempotent
+		end
+		local prod
+		for _, g in ipairs(Monetization.products) do
+			if g.id ~= 0 and g.id == info.ProductId then prod = g end
+		end
+		if not prod then
+			warn("[Purchase] unknown product " .. tostring(info.ProductId))
+			return Enum.ProductPurchaseDecision.NotProcessedYet
+		end
+		p.receipts[receiptKey] = true
+		if prod.grant then
+			Engine.grantReward(p, prod.grant, Session.ctx(player))
+		end
+		if prod.flag then
+			p.owned[prod.flag] = true
+		end
+		Engine.invalidate(p)
+		Session.dirty(player)
+		-- only confirm the receipt once the grant is durably saved
+		if DataService.save(player, false) then
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		end
+		-- keep the receipt marked: the grant is in memory, so a retry must not grant twice
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+end
+
+return PurchaseService
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX24"><Properties><string name="Name">Router</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+-- The single client->server entry point. Every request is: rate-limited, resolved to a whitelisted
+-- action, argument-validated, executed by the pure Engine (which re-validates all game rules),
+-- then followed by an achievement check and a batched state sync.
+
+local Players = game:GetService("Players")
+
+local Shared = require(script.Parent.Parent.Logic.Shared)
+local Engine = require(script.Parent.Parent.Logic.Engine)
+local Config = Shared.Config
+local DataService = require(script.Parent.DataService)
+local Session = require(script.Parent.Session)
+local PlotService = require(script.Parent.PlotService)
+local PurchaseService = require(script.Parent.PurchaseService)
+local LeaderboardService = require(script.Parent.LeaderboardService)
+
+local Router = {}
+
+type Result = { ok: boolean, msg: string, data: any? }
+type Handler = (Player, any, any, any) -> (boolean, string, any?)
+
+local buckets: { [Player]: { tokens: number, last: number } } = {}
+local serverHatched = 0
+local GOAL_STEP = 200
+
+local function takeToken(player: Player, cost: number): boolean
+	local now = os.clock()
+	local b = buckets[player]
+	if not b then
+		b = { tokens = Config.RateLimit.capacity, last = now }
+		buckets[player] = b
+	end
+	b.tokens = math.min(Config.RateLimit.capacity, b.tokens + (now - b.last) * Config.RateLimit.refillPerSecond)
+	b.last = now
+	if b.tokens < cost then
+		return false
+	end
+	b.tokens -= cost
+	return true
+end
+
+local function str(v: any, maxLen: number?): string?
+	if type(v) == "string" and #v <= (maxLen or 40) then
+		return v
+	end
+	return nil
+end
+
+local actions: { [string]: Handler } = {
+	buyMachine = function(_, p, a, ctx) return Engine.buyMachine(p, str(a.id), ctx) end,
+	upgradeMachine = function(_, p, a, ctx)
+		return Engine.upgradeMachine(p, str(a.id), if type(a.count) == "number" then a.count else 1, ctx)
+	end,
+	expandZone = function(_, p, _, ctx) return Engine.expandZone(p, ctx) end,
+	buyEgg = function(_, p, a, ctx)
+		local ok, msg, data = Engine.buyEgg(p, str(a.id), ctx)
+		if ok then
+			serverHatched += 1
+			if serverHatched % GOAL_STEP == 0 then
+				-- server-wide cooperative goal hook: everyone in the server benefits
+				for plr, prof in pairs(DataService.all()) do
+					Engine.grantReward(prof, { cores = 3, biomass = 50 }, Session.ctx(plr))
+					Session.dirty(plr)
+				end
+				Session.announceServer(string.format("Server goal reached: %d eggs hatched! Everyone receives 3 Cores and 50 Biomass.", serverHatched))
+			end
+		end
+		return ok, msg, data
+	end,
+	levelCreature = function(_, p, a, ctx) return Engine.levelCreature(p, str(a.uid), ctx) end,
+	assign = function(_, p, a, ctx)
+		local m = a.machine
+		if m ~= nil and str(m) == nil then return false, "Bad request" end
+		return Engine.assign(p, str(a.uid), m, ctx)
+	end,
+	autoAssign = function(_, p, _, ctx) return Engine.autoAssign(p, ctx) end,
+	release = function(_, p, a, ctx) return Engine.release(p, str(a.uid), ctx) end,
+	fuse = function(_, p, a, ctx)
+		local uids = nil
+		if a.uids ~= nil then
+			if type(a.uids) ~= "table" or #a.uids > 10 then return false, "Bad request" end
+			uids = {}
+			for _, u in ipairs(a.uids) do
+				table.insert(uids, str(u) or "")
+			end
+		end
+		return Engine.fuse(p, str(a.recipe), uids, ctx)
+	end,
+	buyResearch = function(_, p, a, ctx) return Engine.buyResearch(p, str(a.id), ctx) end,
+	rebirth = function(_, p, a, ctx) return Engine.rebirth(p, a.confirm, ctx) end,
+	buyPrestige = function(_, p, a, ctx) return Engine.buyPrestige(p, str(a.id), ctx) end,
+	claimQuest = function(_, p, a, ctx) return Engine.claimQuest(p, str(a.id), ctx) end,
+	setSetting = function(_, p, a, ctx) return Engine.setSetting(p, str(a.key), a.value, ctx) end,
+	setTheme = function(_, p, a, ctx) return Engine.setTheme(p, str(a.theme), ctx) end,
+	buyPass = function(player, _, a) return PurchaseService.prompt(player, "pass", str(a.key)) end,
+	buyProduct = function(player, _, a) return PurchaseService.prompt(player, "product", str(a.key)) end,
+	visit = function(player, _, a)
+		local uid = a.userId
+		if type(uid) ~= "number" or uid ~= uid then return false, "Bad request" end
+		local target = Players:GetPlayerByUserId(uid)
+		if not target or target == player then return false, "Player not found" end
+		local cf = PlotService.visitorCFrame(target)
+		if not cf then return false, "Factory not ready" end
+		PlotService.moveCharacter(player, cf)
+		return true, "Visiting " .. target.DisplayName
+	end,
+	home = function(player)
+		PlotService.moveCharacter(player, PlotService.spawnCFrame(player))
+		return true, "Welcome home"
+	end,
+	leaderboards = function(player)
+		Session.notify(player, "leaderboards", LeaderboardService.snapshot())
+		return true, "ok"
+	end,
+}
+
+-- actions that change nothing and need no state sync
+local READONLY = { leaderboards = true, visit = true, home = true, buyPass = true, buyProduct = true }
+
+function Router.init(remotes: { [string]: any })
+	remotes.Request.OnServerInvoke = function(player: Player, action: any, args: any): Result
+		if type(action) ~= "string" then
+			return { ok = false, msg = "Bad request" }
+		end
+		local handler = actions[action]
+		if not handler then
+			return { ok = false, msg = "Unknown action" }
+		end
+		if type(args) ~= "table" then
+			args = {}
+		end
+		if not takeToken(player, Config.ActionCost[action] or 1) then
+			return { ok = false, msg = "Slow down!" }
+		end
+		local p = DataService.get(player)
+		if not p then
+			return { ok = false, msg = "Still loading your data" }
+		end
+		local ctx = Session.ctx(player)
+		local ok, success, msg, data = pcall(handler, player, p, args, ctx)
+		if not ok then
+			warn(string.format("[Router] %s by %s errored: %s", action, player.Name, tostring(success)))
+			return { ok = false, msg = "Server error" }
+		end
+		if not READONLY[action] then
+			Engine.checkAchievements(p, ctx)
+			Session.dirty(player)
+		end
+		return { ok = success, msg = msg, data = data }
+	end
+	Players.PlayerRemoving:Connect(function(player)
+		buckets[player] = nil
+	end)
+end
+
+--- Plot prompts (walk-up Build / Upgrade) go through the same Engine validation.
+function Router.onPrompt(player: Player, machineId: string)
+	if not takeToken(player, 1) then return end
+	local p = DataService.get(player)
+	if not p then return end
+	local ctx = Session.ctx(player)
+	if p.machines[machineId] then
+		Engine.upgradeMachine(p, machineId, 1, ctx)
+	else
+		local ok, msg = Engine.buyMachine(p, machineId, ctx)
+		if not ok then Session.notify(player, "toast", { text = msg, kind = "bad" }) end
+	end
+	Engine.checkAchievements(p, ctx)
+	Session.dirty(player)
+end
+
+return Router
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX25"><Properties><string name="Name">Session</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Per-player runtime glue: engine context, state replication (batched), notifications and announcements.
+
+local MessagingService = game:GetService("MessagingService")
+local RunService = game:GetService("RunService")
+
+local Shared = require(script.Parent.Parent.Logic.Shared)
+local Engine = require(script.Parent.Parent.Logic.Engine)
+local DataService = require(script.Parent.DataService)
+local PlotService = require(script.Parent.PlotService)
+local Creatures, Config, Format = Shared.Creatures, Shared.Config, Shared.Format
+
+local Session = {}
+
+local remotes: { [string]: any }
+local dirtyPlayers: { [Player]: boolean } = {}
+local TOPIC = "EclipseDiscoveries"
+
+function Session.init(r: { [string]: any })
+	remotes = r
+	-- cross-server discovery announcements (best effort; disabled silently when MessagingService is unavailable)
+	task.spawn(function()
+		local ok, err = pcall(function()
+			MessagingService:SubscribeAsync(TOPIC, function(msg)
+				local d = msg.Data
+				if type(d) == "table" and d.job ~= game.JobId and type(d.text) == "string" then
+					remotes.Announce:FireAllClients({ text = d.text, kind = "global" })
+				end
+			end)
+		end)
+		if not ok and not RunService:IsStudio() then
+			warn("[Session] MessagingService subscribe failed: " .. tostring(err))
+		end
+	end)
+end
+
+function Session.announceServer(text: string, kind: string?)
+	remotes.Announce:FireAllClients({ text = text, kind = kind or "server" })
+end
+
+function Session.announceGlobal(text: string)
+	Session.announceServer(text, "global")
+	task.spawn(function()
+		pcall(function()
+			MessagingService:PublishAsync(TOPIC, { job = game.JobId, text = text })
+		end)
+	end)
+end
+
+function Session.notify(player: Player, kind: string, data: any)
+	remotes.Notify:FireClient(player, kind, data)
+end
+
+--- Builds the Engine context for a player. notify() routes engine events to the client / server.
+function Session.ctx(player: Player): any
+	return {
+		now = os.time(),
+		rng = Random.new(),
+		notify = function(kind: string, data: any)
+			if kind == "announce" then
+				local def = Creatures.byId[data.sp]
+				local mut = Creatures.mutations[Creatures.mutationIndex[data.mut]]
+				local label = (if data.mut ~= "normal" then mut.name .. " " else "") .. def.name
+				Session.announceGlobal(string.format("%s discovered a %s %s!", player.DisplayName, Config.Rarities[def.rarity].id, label))
+			else
+				Session.notify(player, kind, data)
+			end
+		end,
+	}
+end
+
+function Session.dirty(player: Player)
+	dirtyPlayers[player] = true
+end
+
+function Session.snapshot(player: Player, p: any): any
+	local ctx = Session.ctx(player)
+	Engine.refreshDaily(p, ctx.now)
+	local snap = DataService.serialize(p)
+	Engine.stats(p, ctx.now)
+	snap.preview = Engine.rebirthPreview(p, ctx)
+	local ev = p._event
+	snap.event = if ev then { id = ev.id, name = ev.name, desc = ev.desc, effects = ev.effects, endsAt = ev.endsAt } else nil
+	snap.serverTime = ctx.now
+	snap.receipts = nil -- internal bookkeeping, not for clients
+	return snap
+end
+
+function Session.sync(player: Player)
+	local p = DataService.get(player)
+	if not p then
+		return
+	end
+	dirtyPlayers[player] = nil
+	remotes.Sync:FireClient(player, Session.snapshot(player, p))
+	PlotService.update(player, p, Engine.stats(p, os.time()))
+end
+
+--- Flushes pending syncs; called ~10x/s so bursts of actions coalesce into one packet.
+function Session.flush()
+	for player in pairs(dirtyPlayers) do
+		if player.Parent then
+			Session.sync(player)
+		else
+			dirtyPlayers[player] = nil
+		end
+	end
+end
+
+function Session.forget(player: Player)
+	dirtyPlayers[player] = nil
+end
+
+--- leaderstats for the default Roblox player list.
+function Session.updateLeaderstats(player: Player, p: any)
+	local ls = player:FindFirstChild("leaderstats")
+	if not ls then
+		ls = Instance.new("Folder")
+		ls.Name = "leaderstats"
+		local c = Instance.new("StringValue")
+		c.Name = "Cash"
+		c.Parent = ls
+		local r = Instance.new("IntValue")
+		r.Name = "Rebirths"
+		r.Parent = ls
+		ls.Parent = player
+	end
+	local c = (ls :: Instance):FindFirstChild("Cash") :: StringValue
+	local r = (ls :: Instance):FindFirstChild("Rebirths") :: IntValue
+	local txt = Format.number(p.cash)
+	if c.Value ~= txt then c.Value = txt end
+	if r.Value ~= p.rebirths then r.Value = p.rebirths end
+end
+
+return Session
+]]></ProtectedString></Properties></Item></Item></Item></Item><Item class="StarterPlayer" referent="RBX46"><Properties><string name="Name">StarterPlayer</string></Properties><Item class="StarterPlayerScripts" referent="RBX45"><Properties><string name="Name">StarterPlayerScripts</string></Properties><Item class="Folder" referent="RBX44"><Properties><string name="Name">Client</string></Properties><Item class="ModuleScript" referent="RBX29"><Properties><string name="Name">Common</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Shared client helpers: formatting, toasts, modals and server-action wrappers.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Creatures = require(Shared:WaitForChild("Creatures"))
+local Format = require(Shared:WaitForChild("Format"))
+
+local Theme = require(script.Parent.Theme)
+local UI = require(script.Parent.UI)
+local State = require(script.Parent.State)
+
+local Common = {}
+
+Common.layer = nil -- ScreenGui root frame, assigned by Main
+Common.toastHost = nil
+
+local resInfo = {}
+for _, r in ipairs(Config.Resources) do
+	resInfo[r.id] = r
+end
+Common.resInfo = resInfo
+
+function Common.money(res, amount)
+	local info = resInfo[res]
+	return string.format("<font color='#%s'>%s %s</font>", info.color:ToHex(), Format.number(amount), info.name)
+end
+
+--- Cost text coloured green if affordable, red if not.
+function Common.cost(res, amount)
+	local have = State.value(res)
+	local col = if have >= amount then Theme.good else Theme.bad
+	return string.format("<font color='#%s'>%s %s</font>", col:ToHex(), Format.number(amount), resInfo[res].name)
+end
+
+--- Plain cost for use inside buttons (the button's own enabled/disabled colour shows affordability).
+function Common.costPlain(res, amount)
+	return string.format("%s %s", Format.number(amount), resInfo[res].name)
+end
+
+function Common.rewardText(reward)
+	local parts = {}
+	for _, r in ipairs(Config.Resources) do
+		if reward[r.id] and reward[r.id] > 0 then
+			table.insert(parts, Common.money(r.id, reward[r.id]))
+		end
+	end
+	return table.concat(parts, "  ")
+end
+
+function Common.creatureName(c)
+	local def = Creatures.byId[c.sp]
+	local mut = Creatures.mutations[Creatures.mutationIndex[c.mut] or 1]
+	local col = Theme.rarity(def.rarity)
+	local prefix = if c.mut ~= "normal" then string.format("<font color='#%s'>%s</font> ", mut.color:ToHex(), mut.name) else ""
+	return string.format("%s<font color='#%s'>%s</font>", prefix, col:ToHex(), def.name)
+end
+
+----------------------------------------------------------------------------------------------------
+-- Toasts
+----------------------------------------------------------------------------------------------------
+
+function Common.toast(text, kind, duration)
+	local host = Common.toastHost
+	if not host then
+		return
+	end
+	local color = if kind == "good" then Theme.good elseif kind == "bad" then Theme.bad elseif kind == "gold" then Theme.accent else Theme.info
+	local t = UI.card(host, { BackgroundColor3 = Theme.panel, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y })
+	UI.stroke(t, color, 2)
+	UI.padding(t, 8)
+	UI.label(t, text, { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextXAlignment = Enum.TextXAlignment.Left })
+	task.delay(duration or 3.5, function()
+		if t.Parent then
+			t:Destroy()
+		end
+	end)
+	-- keep the stack short
+	local kids = {}
+	for _, c in ipairs(host:GetChildren()) do
+		if c:IsA("Frame") then table.insert(kids, c) end
+	end
+	while #kids > 5 do
+		table.remove(kids, 1):Destroy()
+	end
+end
+
+--- Server action with toast feedback. onDone(ok, msg, data) optional.
+function Common.act(action, args, onDone, silentSuccess)
+	task.spawn(function()
+		local ok, msg, data = State.request(action, args)
+		if not ok then
+			Common.toast(msg or "Failed", "bad")
+		elseif not silentSuccess and msg and msg ~= "" then
+			Common.toast(msg, "good", 2)
+		end
+		if onDone then
+			onDone(ok, msg, data)
+		end
+	end)
+end
+
+----------------------------------------------------------------------------------------------------
+-- Modals
+----------------------------------------------------------------------------------------------------
+
+function Common.modal(title, bodyText, buttons, width)
+	local overlay = UI.frame(Common.layer, {
+		Name = "Modal", BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.45,
+		Size = UDim2.fromScale(1, 1), ZIndex = 50, Active = true,
+	})
+	local box = UI.card(overlay, {
+		BackgroundColor3 = Theme.panel, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.new(0, width or 460, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, ZIndex = 51,
+	})
+	UI.stroke(box, Theme.accent, 2)
+	UI.padding(box, 16)
+	local list = UI.listLayout(box, 10)
+	UI.label(box, title, { Size = UDim2.new(1, 0, 0, 28), TextSize = Theme.size.title, Font = Theme.fontBold, ZIndex = 52 })
+	UI.label(box, bodyText, { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, ZIndex = 52 })
+	local row = UI.frame(box, { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 36), ZIndex = 52 })
+	UI.listLayout(row, 8, Enum.FillDirection.Horizontal)
+	row.ChildAdded:Connect(function() end)
+	for _, b in ipairs(buttons) do
+		UI.button(row, b.text, function()
+			overlay:Destroy()
+			if b.onClick then b.onClick() end
+		end, { color = b.color or Theme.accent, Size = UDim2.fromOffset(b.width or 130, 34), ZIndex = 53 })
+	end
+	return overlay
+end
+
+function Common.confirm(title, body, yesText, onYes)
+	Common.modal(title, body, {
+		{ text = yesText or "Confirm", color = Theme.bad, onClick = onYes, width = 170 },
+		{ text = "Cancel", color = Theme.cardHi },
+	}, 520)
+end
+
+--- Egg / fusion reveal card.
+function Common.reveal(d)
+	local def = Creatures.byId[d.sp]
+	local rcol = Theme.rarity(def.rarity)
+	local mut = Creatures.mutations[Creatures.mutationIndex[d.mut] or 1]
+	local trait = Creatures.traitById[d.trait]
+	local card = UI.card(Common.layer, {
+		BackgroundColor3 = Theme.panel, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.45),
+		Size = UDim2.fromOffset(280, 0), AutomaticSize = Enum.AutomaticSize.Y, ZIndex = 40,
+	})
+	UI.stroke(card, rcol, 3)
+	UI.padding(card, 14)
+	UI.listLayout(card, 4)
+	local holder = UI.frame(card, { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 90), ZIndex = 41, LayoutOrder = 1 })
+	local orb = UI.frame(holder, {
+		BackgroundColor3 = if d.mut ~= "normal" then mut.color else rcol, Size = UDim2.fromOffset(72, 72), ZIndex = 41,
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
+	})
+	UI.corner(orb, 36)
+	local center = Enum.TextXAlignment.Center
+	UI.label(card, Common.creatureName({ sp = d.sp, mut = d.mut }), { Size = UDim2.new(1, 0, 0, 26), TextSize = Theme.size.title, Font = Theme.fontBold, TextXAlignment = center, ZIndex = 41, LayoutOrder = 2 })
+	UI.label(card, string.format("%s  |  %s%s", Config.Rarities[def.rarity].id, def.element:sub(1, 1):upper() .. def.element:sub(2), (trait and trait.id ~= "none") and ("  |  " .. trait.name) or ""), { Size = UDim2.new(1, 0, 0, 20), TextColor3 = Theme.textDim, TextXAlignment = center, ZIndex = 41, LayoutOrder = 3 })
+	if d.isNew then
+		UI.label(card, "NEW DISCOVERY!", { Size = UDim2.new(1, 0, 0, 22), TextColor3 = Theme.accent, Font = Theme.fontBold, TextXAlignment = center, ZIndex = 41, LayoutOrder = 4 })
+	end
+	UI.tween(orb, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Size = UDim2.fromOffset(84, 84) })
+	task.delay(2.6, function()
+		if card.Parent then
+			card:Destroy()
+		end
+	end)
+end
+
+--- Popup menu anchored near a button.
+function Common.menu(anchor, options)
+	local overlay = UI.new("TextButton", {
+		Text = "", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 60, AutoButtonColor = false,
+	}, Common.layer)
+	local box = UI.card(overlay, { BackgroundColor3 = Theme.panel, Size = UDim2.fromOffset(200, 0), AutomaticSize = Enum.AutomaticSize.Y, ZIndex = 61 })
+	UI.padding(box, 6)
+	UI.listLayout(box, 4)
+	local layerAbs = Common.layer.AbsolutePosition
+	local scale = Common.scale or 1
+	local abs = anchor.AbsolutePosition
+	local x = (abs.X - layerAbs.X) / scale - 100 + (anchor.AbsoluteSize.X / scale) / 2
+	local y = (abs.Y - layerAbs.Y) / scale + anchor.AbsoluteSize.Y / scale + 4
+	box.Position = UDim2.fromOffset(math.max(8, x), y)
+	for _, o in ipairs(options) do
+		local b = UI.button(box, o.text, function()
+			overlay:Destroy()
+			o.onClick()
+		end, { Size = UDim2.new(1, 0, 0, 30), color = Theme.cardHi, TextColor3 = Theme.text, ZIndex = 62 })
+		b.TextColor3 = Theme.text
+		b:SetAttribute("TextOn", Theme.text)
+		if o.disabled then UI.setDisabled(b, true) end
+	end
+	overlay.Activated:Connect(function()
+		overlay:Destroy()
+	end)
+end
+
+return Common
+]]></ProtectedString></Properties></Item><Item class="LocalScript" referent="RBX30"><Properties><string name="Name">Main</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+-- ECLIPSE: INFINITE EMPIRE - client bootstrap: HUD, navigation, page manager, server notifications.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Quests = require(Shared:WaitForChild("Quests"))
+local Format = require(Shared:WaitForChild("Format"))
+local Creatures = require(Shared:WaitForChild("Creatures"))
+
+local Theme = require(script.Parent.Theme)
+local UI = require(script.Parent.UI)
+local State = require(script.Parent.State)
+local Common = require(script.Parent.Common)
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local pageModules = {
+	require(script.Parent.Pages.Factory),
+	require(script.Parent.Pages.Creatures),
+	require(script.Parent.Pages.Eggs),
+	require(script.Parent.Pages.Research),
+	require(script.Parent.Pages.Rebirth),
+	require(script.Parent.Pages.QuestsPage),
+	require(script.Parent.Pages.Index),
+	require(script.Parent.Pages.Leaders),
+	require(script.Parent.Pages.Settings),
+}
+
+----------------------------------------------------------------------------------------------------
+-- Root + responsive scale
+----------------------------------------------------------------------------------------------------
+
+local gui = UI.new("ScreenGui", {
+	Name = "EclipseUI", ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, IgnoreGuiInset = true,
+}, playerGui)
+local root = UI.new("Frame", { Name = "Root", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1) }, gui)
+local uiScale = UI.new("UIScale", { Scale = 1 }, root)
+Common.layer = root
+
+local function rescale()
+	local cam = workspace.CurrentCamera
+	if not cam then return end
+	local vp = cam.ViewportSize
+	local s = math.clamp(math.min(vp.X / 1100, vp.Y / 650), 0.5, 1.15)
+	uiScale.Scale = s
+	root.Size = UDim2.fromScale(1 / s, 1 / s)
+	Common.scale = s
+end
+rescale()
+if workspace.CurrentCamera then
+	workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(rescale)
+end
+
+----------------------------------------------------------------------------------------------------
+-- Top bar: resource chips
+----------------------------------------------------------------------------------------------------
+
+local topBar = UI.frame(root, { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 48) })
+local topList = UI.listLayout(topBar, 8, Enum.FillDirection.Horizontal)
+topList.HorizontalAlignment = Enum.HorizontalAlignment.Center
+topList.VerticalAlignment = Enum.VerticalAlignment.Center
+
+local chips = {}
+for _, r in ipairs(Config.Resources) do
+	local chip = UI.card(topBar, { BackgroundColor3 = Theme.panel, Size = UDim2.fromOffset(168, 40) })
+	UI.stroke(chip, r.color, 1.5)
+	local icon = UI.frame(chip, { BackgroundColor3 = r.color, Size = UDim2.fromOffset(26, 26), Position = UDim2.fromOffset(7, 7) })
+	UI.corner(icon, 13)
+	UI.label(icon, r.icon, { Size = UDim2.fromScale(1, 1), TextXAlignment = Enum.TextXAlignment.Center, TextColor3 = Color3.fromRGB(20, 20, 30), Font = Theme.fontBold, TextWrapped = false })
+	local value = UI.label(chip, "0", { Position = UDim2.fromOffset(40, 2), Size = UDim2.new(1, -44, 0, 22), Font = Theme.fontBold, TextSize = 18, TextWrapped = false })
+	local rate = UI.label(chip, "", { Position = UDim2.fromOffset(40, 22), Size = UDim2.new(1, -44, 0, 16), TextSize = 12, TextColor3 = Theme.textDim, TextWrapped = false })
+	chips[r.id] = { value = value, rate = rate }
+end
+
+task.spawn(function()
+	while true do
+		if State.ready then
+			for id, c in pairs(chips) do
+				c.value.Text = Format.number(State.value(id))
+				local r = State.rate(id)
+				c.rate.Text = if id == "echoes" then string.format("+%d%% cash", State.data.echoesEarned * Config.EchoPassiveBonus * 100 + 0.5) elseif r > 0 then ("+" .. Format.rate(r) .. "/s") else ""
+			end
+		end
+		task.wait(0.1)
+	end
+end)
+
+----------------------------------------------------------------------------------------------------
+-- Event chip, announcement banner, toasts
+----------------------------------------------------------------------------------------------------
+
+local eventChip = UI.card(root, {
+	BackgroundColor3 = Theme.panel, AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -8, 0, 8),
+	Size = UDim2.fromOffset(250, 40), Visible = false,
+})
+UI.stroke(eventChip, Theme.accent, 2)
+local eventLabel = UI.label(eventChip, "", { Size = UDim2.new(1, -12, 1, 0), Position = UDim2.fromOffset(8, 0), TextSize = 13 })
+
+local banner = UI.card(root, {
+	BackgroundColor3 = Theme.panel, AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 54),
+	Size = UDim2.fromOffset(560, 34), Visible = false, ZIndex = 30,
+})
+local bannerLabel = UI.label(banner, "", { Size = UDim2.new(1, -16, 1, 0), Position = UDim2.fromOffset(8, 0), TextXAlignment = Enum.TextXAlignment.Center, ZIndex = 31, TextSize = 14 })
+local bannerToken = 0
+
+local function showBanner(text, kind)
+	bannerToken += 1
+	local mine = bannerToken
+	banner.Visible = true
+	local c = if kind == "global" then Theme.accent elseif kind == "event" then Theme.info else Theme.good
+	banner:FindFirstChildOfClass("UIStroke").Color = c
+	bannerLabel.Text = text
+	task.delay(7, function()
+		if mine == bannerToken then banner.Visible = false end
+	end)
+end
+
+local toastHost = UI.frame(root, {
+	BackgroundTransparency = 1, AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -8, 1, -8),
+	Size = UDim2.fromOffset(300, 300), ZIndex = 20,
+})
+local toastList = UI.listLayout(toastHost, 6)
+toastList.VerticalAlignment = Enum.VerticalAlignment.Bottom
+Common.toastHost = toastHost
+
+----------------------------------------------------------------------------------------------------
+-- Page panel + navigation
+----------------------------------------------------------------------------------------------------
+
+local panel = UI.card(root, {
+	Name = "Panel", BackgroundColor3 = Theme.panel, AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 56, 0, 56),
+	Size = UDim2.new(1, -124, 1, -128), Visible = false, ZIndex = 5,
+})
+UI.new("UISizeConstraint", { MaxSize = Vector2.new(980, 900), MinSize = Vector2.new(300, 200) }, panel)
+local header = UI.frame(panel, { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 44), ZIndex = 6 })
+local titleLabel = UI.label(header, "", { Position = UDim2.fromOffset(16, 0), Size = UDim2.new(1, -70, 1, 0), TextSize = Theme.size.title, Font = Theme.fontBold, ZIndex = 6, TextWrapped = false })
+local content = UI.frame(panel, { BackgroundTransparency = 1, Position = UDim2.fromOffset(12, 46), Size = UDim2.new(1, -24, 1, -56), ZIndex = 6, ClipsDescendants = true })
+
+local currentPage = nil
+local navButtons = {}
+
+local renderRequested = false
+local function renderNow()
+	if not currentPage or not State.ready then return end
+	-- remember scroll offsets so periodic refreshes do not jump
+	local saved = {}
+	for _, d in ipairs(content:GetDescendants()) do
+		if d:IsA("ScrollingFrame") then
+			saved[d.Name] = d.CanvasPosition
+		end
+	end
+	for _, c in ipairs(content:GetChildren()) do
+		c:Destroy()
+	end
+	local ok, err = pcall(currentPage.render, content)
+	if not ok then
+		warn("[UI] page render failed: " .. tostring(err))
+		UI.label(content, "Something went wrong drawing this page.", { Size = UDim2.new(1, 0, 0, 30) })
+	end
+	task.defer(function()
+		for _, d in ipairs(content:GetDescendants()) do
+			if d:IsA("ScrollingFrame") and saved[d.Name] then
+				d.CanvasPosition = saved[d.Name]
+			end
+		end
+	end)
+end
+
+local function requestRender()
+	renderRequested = true
+end
+Common.refresh = requestRender
+
+local function setPage(mod)
+	if currentPage == mod then
+		currentPage = nil
+		panel.Visible = false
+	else
+		currentPage = mod
+		panel.Visible = true
+		titleLabel.Text = mod.title
+		for _, c in ipairs(content:GetChildren()) do c:Destroy() end
+		renderNow()
+	end
+	for m, b in pairs(navButtons) do
+		b.BackgroundColor3 = if m == currentPage then Theme.accent else Theme.panel
+		b.TextColor3 = if m == currentPage then Color3.fromRGB(25, 20, 10) else Theme.text
+	end
+end
+Common.openPage = function(id)
+	for _, m in ipairs(pageModules) do
+		if m.id == id and currentPage ~= m then setPage(m) end
+	end
+end
+
+UI.button(header, "X", function() if currentPage then setPage(currentPage) end end, {
+	Position = UDim2.new(1, -44, 0, 6), Size = UDim2.fromOffset(34, 32), color = Theme.cardHi, ZIndex = 7, textColor = Theme.text,
+})
+
+local nav = UI.card(root, { BackgroundColor3 = Theme.bg, Position = UDim2.fromOffset(8, 56), Size = UDim2.new(0, 100, 1, -128) })
+local navScroll = UI.scroll(nav, { Size = UDim2.new(1, 0, 1, 0), ScrollBarThickness = 3 })
+UI.padding(navScroll, 5)
+for i, mod in ipairs(pageModules) do
+	local b = UI.button(navScroll, mod.title, function() setPage(mod) end, {
+		Size = UDim2.new(1, -6, 0, 38), color = Theme.panel, LayoutOrder = i, TextSize = 14,
+	})
+	b.TextColor3 = Theme.text
+	b:SetAttribute("TextOn", Theme.text)
+	navButtons[mod] = b
+end
+
+task.spawn(function()
+	local sinceRender = 0
+	while true do
+		task.wait(0.1)
+		sinceRender += 0.1
+		if currentPage and State.ready and not UI.pressing and (renderRequested or sinceRender >= 1) then
+			renderRequested = false
+			sinceRender = 0
+			renderNow()
+		end
+	end
+end)
+State.onChange(requestRender)
+
+----------------------------------------------------------------------------------------------------
+-- Objective tracker (tutorial -> next milestone)
+----------------------------------------------------------------------------------------------------
+
+local tracker = UI.card(root, {
+	BackgroundColor3 = Theme.panel, AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 56, 1, -8),
+	Size = UDim2.fromOffset(560, 56), Visible = false, ZIndex = 4,
+})
+UI.stroke(tracker, Theme.accent, 1.5)
+local trackTitle = UI.label(tracker, "", { Position = UDim2.fromOffset(10, 4), Size = UDim2.new(1, -130, 0, 20), Font = Theme.fontBold, TextWrapped = false })
+local trackHint = UI.label(tracker, "", { Position = UDim2.fromOffset(10, 24), Size = UDim2.new(1, -130, 0, 30), TextSize = 12, TextColor3 = Theme.textDim })
+local trackBtn = UI.button(tracker, "Claim", function() end, { Position = UDim2.new(1, -114, 0.5, -16), Size = UDim2.fromOffset(104, 32), color = Theme.good })
+local trackQuest = nil
+trackBtn.Activated:Connect(function()
+	if trackQuest and not trackBtn:GetAttribute("Disabled") then
+		Common.act("claimQuest", { id = trackQuest.id })
+	end
+end)
+
+local function refreshTracker()
+	if not State.ready then return end
+	local d = State.data
+	local q = Quests.tutorial[d.tutorial]
+	trackQuest = q
+	if not q then
+		-- tutorial finished: suggest the next unclaimed milestone
+		local next
+		for _, m in ipairs(Quests.milestones) do
+			if not d.quests.claimed[m.id] then next = m break end
+		end
+		if next then
+			tracker.Visible = true
+			local cur = Quests.getStat(d, next.stat)
+			trackTitle.Text = "Goal: " .. next.name
+			trackHint.Text = string.format("%s (%s / %s)", next.desc, Format.number(math.min(cur, next.target)), Format.number(next.target))
+			trackQuest = next
+			UI.setDisabled(trackBtn, cur < next.target, if cur < next.target then "In progress" else "Claim")
+			trackBtn.Text = if cur < next.target then "In progress" else "Claim"
+		else
+			tracker.Visible = false
+		end
+		return
+	end
+	tracker.Visible = true
+	local cur = Quests.getStat(d, q.stat)
+	trackTitle.Text = string.format("Step %d/%d: %s  (%s/%s)", d.tutorial, #Quests.tutorial, q.name, Format.number(math.min(cur, q.target)), Format.number(q.target))
+	trackHint.Text = if cur >= q.target then "Complete! " .. Common.rewardText(q.reward) else q.hint
+	trackBtn.Text = if cur >= q.target then "Claim" else "..."
+	UI.setDisabled(trackBtn, cur < q.target)
+end
+State.onChange(refreshTracker)
+State.onTick(refreshTracker)
+
+-- event banner chip
+local function refreshEvent()
+	local ev = State.data and State.data.event
+	if ev then
+		eventChip.Visible = true
+		eventLabel.Text = string.format("<b>%s</b>\n%s", ev.name, ev.desc)
+	else
+		eventChip.Visible = false
+	end
+end
+State.onChange(refreshEvent)
+
+----------------------------------------------------------------------------------------------------
+-- Server -> client notifications
+----------------------------------------------------------------------------------------------------
+
+local remotes = State.remotes
+remotes.Notify.OnClientEvent:Connect(function(kind, data)
+	local notifOn = not (State.data and State.data.settings and State.data.settings.notifications == false)
+	if kind == "toast" then
+		if notifOn or data.kind == "bad" then Common.toast(data.text, data.kind) end
+	elseif kind == "reward" then
+		if notifOn then Common.toast("Reward: " .. Common.rewardText(data), "gold", 3) end
+	elseif kind == "discovery" then
+		local def = Creatures.byId[data.sp]
+		Common.toast(string.format("New discovery: %s!\nBonus: %s", Common.creatureName({ sp = data.sp, mut = data.mut }), Common.rewardText(data.reward)), "gold", 5)
+	elseif kind == "achievement" then
+		Common.toast(string.format("Achievement: %s\n%s", data.name, Common.rewardText(data.reward)), "gold", 5)
+	elseif kind == "leaderboards" then
+		State.leaderboards = data
+		requestRender()
+	elseif kind == "offline" then
+		local gains = Common.rewardText(data.gains)
+		Common.modal("Welcome back!", string.format("Your factory kept working for %s%s.\n\n%s", Format.duration(data.seconds), data.capped and " (offline cap reached - research Night Shift / Deep Storage to extend it)" or "", gains), {
+			{ text = "Nice!", width = 120 },
+		})
+	end
+end)
+
+remotes.Announce.OnClientEvent:Connect(function(data)
+	showBanner(data.text, data.kind)
+end)
+
+task.spawn(function()
+	-- wait for the first state sync, then greet and open the factory
+	while not State.ready do
+		task.wait(0.2)
+	end
+	State.syncClock = os.clock()
+	refreshTracker()
+	refreshEvent()
+end)
+
+State.onChange(function() State.syncClock = os.clock() end)
+
+]]></ProtectedString></Properties></Item><Item class="Folder" referent="RBX40"><Properties><string name="Name">Pages</string></Properties><Item class="ModuleScript" referent="RBX31"><Properties><string name="Name">Creatures</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Machines = require(Shared:WaitForChild("Machines"))
+local Creatures = require(Shared:WaitForChild("Creatures"))
+local Formulas = require(Shared:WaitForChild("Formulas"))
+local Stats = require(Shared:WaitForChild("Stats"))
+local Format = require(Shared:WaitForChild("Format"))
+
+local Theme = require(script.Parent.Parent.Theme)
+local UI = require(script.Parent.Parent.UI)
+local State = require(script.Parent.Parent.State)
+local Common = require(script.Parent.Parent.Common)
+
+local Page = { id = "creatures", title = "Creatures" }
+
+local filterFree = false
+local releaseArmed = {} -- uid -> expiry clock (two-step release)
+
+local function passiveText(def)
+	if not def.passive then return "" end
+	local parts = {}
+	local names = {
+		cashMult = "cash", biomassMult = "biomass", coreMult = "cores", mutationLuck = "mutation luck",
+		upgradeDiscount = "upgrade discount",
+	}
+	for k, v in pairs(def.passive) do
+		table.insert(parts, string.format("+%d%% %s", v * 100 + 0.5, names[k] or k))
+	end
+	table.sort(parts)
+	return table.concat(parts, ", ")
+end
+
+function Page.render(content)
+	local d, st = State.data, State.stats
+	local list = {}
+	local count = 0
+	for uid, c in pairs(d.creatures) do
+		count += 1
+		if not (filterFree and c.mach) then
+			table.insert(list, { uid = uid, c = c, def = Creatures.byId[c.sp] })
+		end
+	end
+	table.sort(list, function(a, b)
+		if a.def.rarity ~= b.def.rarity then return a.def.rarity > b.def.rarity end
+		local ma, mb = Creatures.mutationIndex[a.c.mut], Creatures.mutationIndex[b.c.mut]
+		if ma ~= mb then return ma > mb end
+		if a.c.lvl ~= b.c.lvl then return a.c.lvl > b.c.lvl end
+		return a.uid < b.uid
+	end)
+
+	local top = UI.frame(content, { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 36) })
+	local capColor = if count >= st.invCap then Theme.bad else Theme.textDim
+	UI.label(top, string.format("Inventory <font color='#%s'>%d / %d</font>   |   Biomass: %s", capColor:ToHex(), count, st.invCap, Common.money("biomass", State.value("biomass"))), {
+		Size = UDim2.new(1, -280, 1, 0), TextWrapped = false, TextSize = 14,
+	})
+	UI.button(top, filterFree and "Showing: free" or "Showing: all", function() filterFree = not filterFree Common.refresh() end, {
+		Position = UDim2.new(1, -270, 0, 2), Size = UDim2.fromOffset(120, 30), color = Theme.cardHi, textColor = Theme.text,
+	})
+	local opt = UI.button(top, "Optimize", function() Common.act("autoAssign") end, {
+		Position = UDim2.new(1, -140, 0, 2), Size = UDim2.fromOffset(130, 30), color = Theme.good,
+	})
+	if not st.flags.autoAssign then
+		UI.setDisabled(opt, true, "Optimize (locked)")
+	end
+
+	local scroll = UI.scroll(content, { Name = "Scroll", Position = UDim2.fromOffset(0, 40), Size = UDim2.new(1, 0, 1, -40) })
+	for i, e in ipairs(list) do
+		local c, def, uid = e.c, e.def, e.uid
+		local rcol = Theme.rarity(def.rarity)
+		local card = UI.card(scroll, { Size = UDim2.new(1, -8, 0, 72), LayoutOrder = i })
+		local bar = UI.frame(card, { BackgroundColor3 = rcol, Size = UDim2.new(0, 6, 1, -12), Position = UDim2.fromOffset(6, 6) })
+		UI.corner(bar, 3)
+		UI.label(card, string.format("<b>%s</b>  <font color='#%s'>%s</font>", Common.creatureName(c), Theme.textDim:ToHex(), Config.Rarities[def.rarity].id), {
+			Position = UDim2.fromOffset(20, 6), Size = UDim2.new(1, -340, 0, 20), TextSize = 16, TextWrapped = false,
+		})
+		local trait = Creatures.traitById[c.trait]
+		local el = Config.Elements[def.element]
+		local power = Stats.creaturePower(c, st.creaturePower)
+		UI.label(card, string.format("Lv %d  |  <font color='#%s'>%s</font>  |  power %s%s%s", c.lvl, el.color:ToHex(), el.name, Format.rate(power),
+			(trait and trait.id ~= "none") and ("  |  " .. trait.name) or "", def.passive and ("  |  " .. passiveText(def)) or ""), {
+			Position = UDim2.fromOffset(20, 28), Size = UDim2.new(1, -340, 0, 18), TextSize = 12, TextColor3 = Theme.textDim, TextWrapped = false,
+		})
+		local where = if c.mach then ("Working at " .. Machines.byId[c.mach].name) else "Idle"
+		UI.label(card, where, { Position = UDim2.fromOffset(20, 48), Size = UDim2.new(1, -340, 0, 18), TextSize = 12, TextColor3 = if c.mach then Theme.good else Theme.accent, TextWrapped = false })
+
+		local btns = UI.frame(card, { BackgroundTransparency = 1, Position = UDim2.new(1, -324, 0, 8), Size = UDim2.fromOffset(316, 56) })
+		UI.listLayout(btns, 6, Enum.FillDirection.Horizontal)
+		local assignBtn
+		assignBtn = UI.button(btns, c.mach and "Move" or "Assign", function()
+			local opts = {}
+			for _, m in ipairs(Machines.list) do
+				local info = st.machines[m.id]
+				if info then
+					local used = #info.assigned
+					local compat = if m.element == def.element then "full power" else string.format("%d%%", Config.IncompatibleEfficiency * 100)
+					table.insert(opts, {
+						text = string.format("%s (%d/%d) - %s", m.name, used, info.slots, compat),
+						disabled = used >= info.slots and c.mach ~= m.id,
+						onClick = function() Common.act("assign", { uid = uid, machine = m.id }, nil, true) end,
+					})
+				end
+			end
+			if c.mach then
+				table.insert(opts, { text = "Unassign", onClick = function() Common.act("assign", { uid = uid }, nil, true) end })
+			end
+			Common.menu(assignBtn, opts)
+		end, { Size = UDim2.fromOffset(94, 56), color = Theme.info })
+		local lvlBtn = UI.button(btns, "", function() Common.act("levelCreature", { uid = uid }, nil, true) end, { Size = UDim2.fromOffset(110, 56) })
+		if c.lvl >= Config.CreatureMaxLevel then
+			lvlBtn.Text = "MAX"
+			UI.setDisabled(lvlBtn, true)
+		else
+			local cost = Formulas.creatureLevelCost(def.rarity, c.lvl)
+			lvlBtn.Text = "Level up\n" .. Common.costPlain("biomass", cost)
+			UI.setDisabled(lvlBtn, State.value("biomass") < cost)
+		end
+		local armed = releaseArmed[uid] and releaseArmed[uid] > os.clock()
+		UI.button(btns, armed and "Sure?" or "Release", function()
+			if releaseArmed[uid] and releaseArmed[uid] > os.clock() then
+				releaseArmed[uid] = nil
+				Common.act("release", { uid = uid })
+			else
+				releaseArmed[uid] = os.clock() + 4
+				Common.refresh()
+			end
+		end, { Size = UDim2.fromOffset(84, 56), color = if armed then Theme.bad else Theme.cardHi, textColor = Theme.text })
+	end
+	if #list == 0 then
+		UI.label(scroll, "Nothing to show. Hatch some eggs in the Eggs tab!", { Size = UDim2.new(1, 0, 0, 40), TextColor3 = Theme.textDim })
+	end
+end
+
+return Page
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX32"><Properties><string name="Name">Eggs</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Machines = require(Shared:WaitForChild("Machines"))
+local Creatures = require(Shared:WaitForChild("Creatures"))
+local Research = require(Shared:WaitForChild("Research"))
+local Formulas = require(Shared:WaitForChild("Formulas"))
+local Monetization = require(Shared:WaitForChild("Monetization"))
+
+local Theme = require(script.Parent.Parent.Theme)
+local UI = require(script.Parent.Parent.UI)
+local State = require(script.Parent.Parent.State)
+local Common = require(script.Parent.Parent.Common)
+
+local Page = { id = "eggs", title = "Eggs" }
+local tab = "eggs"
+
+local function tabs(content)
+	local row = UI.frame(content, { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 36) })
+	UI.listLayout(row, 8, Enum.FillDirection.Horizontal)
+	for _, t in ipairs({ { "eggs", "Eggs" }, { "fusion", "Fusion Lab" }, { "store", "Store" } }) do
+		UI.button(row, t[2], function() tab = t[1] Common.refresh() end, {
+			Size = UDim2.fromOffset(130, 32), color = if tab == t[1] then Theme.accent else Theme.cardHi,
+			textColor = if tab == t[1] then nil else Theme.text,
+		})
+	end
+end
+
+local function eggsTab(area)
+	local d = State.data
+	local scroll = UI.scroll(area, { Name = "Scroll" })
+	local pityLeft = math.max(1, Config.PityThreshold - d.pity)
+	UI.label(scroll, string.format("Rare-or-better is guaranteed within <b>%d</b> hatches (pity). Mutation luck: <b>+%d%%</b>", pityLeft, State.stats.mutationLuck * 100 + 0.5), {
+		Size = UDim2.new(1, -8, 0, 20), TextSize = 13, TextColor3 = Theme.textDim, LayoutOrder = 0,
+	})
+	for i, egg in ipairs(Creatures.eggs) do
+		local card = UI.card(scroll, { Size = UDim2.new(1, -8, 0, 108), LayoutOrder = i })
+		local orb = UI.frame(card, { BackgroundColor3 = egg.color, Size = UDim2.fromOffset(54, 66), Position = UDim2.fromOffset(12, 20) })
+		UI.corner(orb, 27)
+		UI.label(card, "<b>" .. egg.name .. "</b>", { Position = UDim2.fromOffset(80, 8), Size = UDim2.new(1, -300, 0, 22), TextSize = 17, TextWrapped = false })
+		local total = 0
+		for _, w in ipairs(egg.weights) do total += w end
+		local odds = {}
+		for r, w in ipairs(egg.weights) do
+			if w > 0 then
+				table.insert(odds, string.format("<font color='#%s'>%s %s%%</font>", Theme.rarity(r):ToHex(), Config.Rarities[r].id, tostring(math.floor(w / total * 1000 + 0.5) / 10)))
+			end
+		end
+		UI.label(card, table.concat(odds, "   "), { Position = UDim2.fromOffset(80, 32), Size = UDim2.new(1, -300, 0, 40), TextSize = 13 })
+		local req = nil
+		if d.zone < egg.zone then
+			req = "Requires " .. Machines.zones[egg.zone].name
+		elseif egg.requiresResearch and not d.research[egg.requiresResearch] then
+			req = "Research: " .. Research.byId[egg.requiresResearch].name
+		end
+		local price = Formulas.eggCost(egg, d.eggsRun or 0)
+		UI.label(card, req or ("Price rises slightly with each egg bought this run (resets on rebirth)."), {
+			Position = UDim2.fromOffset(80, 76), Size = UDim2.new(1, -300, 0, 28), TextSize = 12, TextColor3 = if req then Theme.bad else Theme.textDim,
+		})
+		local b = UI.button(card, "Hatch\n" .. Common.costPlain(egg.currency, price), function()
+			Common.act("buyEgg", { id = egg.id }, function(ok, _, data) if ok and data then Common.reveal(data) end end, true)
+		end, { Position = UDim2.new(1, -200, 0.5, -28), Size = UDim2.fromOffset(190, 56) })
+		UI.setDisabled(b, req ~= nil or State.value(egg.currency) < price)
+	end
+end
+
+local function fusionTab(area)
+	local d, st = State.data, State.stats
+	local have = {}
+	for _, c in pairs(d.creatures) do have[c.sp] = (have[c.sp] or 0) + 1 end
+	local scroll = UI.scroll(area, { Name = "Scroll" })
+	UI.label(scroll, "Fusing consumes your lowest-level, least-mutated copies first. The result may inherit the best mutation among the ingredients, and fusion has boosted mutation luck. Mythic creatures can only be fused!", {
+		Size = UDim2.new(1, -8, 0, 40), TextSize = 13, TextColor3 = Theme.textDim, LayoutOrder = 0,
+	})
+	for i, r in ipairs(Creatures.recipes) do
+		local res = Creatures.byId[r.result]
+		local ok = true
+		local parts = {}
+		for sp, n in pairs(r.inputs) do
+			local def = Creatures.byId[sp]
+			local h = have[sp] or 0
+			if h < n then ok = false end
+			table.insert(parts, string.format("%dx <font color='#%s'>%s</font> <font color='#%s'>(have %d)</font>", n, Theme.rarity(def.rarity):ToHex(), def.name, (h >= n and Theme.good or Theme.bad):ToHex(), h))
+		end
+		table.sort(parts)
+		local cost = math.ceil(r.cost * (1 - st.fusionDiscount))
+		local card = UI.card(scroll, { Size = UDim2.new(1, -8, 0, 64), LayoutOrder = i })
+		UI.label(card, table.concat(parts, "  +  "), { Position = UDim2.fromOffset(12, 6), Size = UDim2.new(1, -230, 0, 26), TextSize = 13 })
+		UI.label(card, string.format("=> <b><font color='#%s'>%s</font></b> (%s)", Theme.rarity(res.rarity):ToHex(), res.name, Config.Rarities[res.rarity].id), {
+			Position = UDim2.fromOffset(12, 34), Size = UDim2.new(1, -230, 0, 22), TextSize = 15, TextWrapped = false,
+		})
+		local b = UI.button(card, "Fuse\n" .. Common.costPlain("biomass", cost), function()
+			Common.act("fuse", { recipe = r.id }, function(success, _, data) if success and data then Common.reveal(data) end end, true)
+		end, { Position = UDim2.new(1, -150, 0.5, -24), Size = UDim2.fromOffset(140, 48) })
+		UI.setDisabled(b, not ok or State.value("biomass") < cost)
+	end
+end
+
+local function storeTab(area)
+	local d = State.data
+	local scroll = UI.scroll(area, { Name = "Scroll" })
+	UI.label(scroll, "Everything here is optional. Core progression never requires Robux; passes are convenience or cosmetic only.", {
+		Size = UDim2.new(1, -8, 0, 22), TextSize = 13, TextColor3 = Theme.textDim, LayoutOrder = 0,
+	})
+	local order = 1
+	local function item(kind, it)
+		local owned = kind == "pass" and d.owned[it.key]
+		local card = UI.card(scroll, { Size = UDim2.new(1, -8, 0, 62), LayoutOrder = order })
+		order += 1
+		UI.label(card, "<b>" .. it.name .. "</b>", { Position = UDim2.fromOffset(12, 6), Size = UDim2.new(1, -170, 0, 22), TextSize = 16, TextWrapped = false })
+		UI.label(card, it.desc, { Position = UDim2.fromOffset(12, 30), Size = UDim2.new(1, -170, 0, 28), TextSize = 12, TextColor3 = Theme.textDim })
+		local label = if owned then "Owned" elseif it.id == 0 then "Coming soon" else "Buy (R$)"
+		local b = UI.button(card, label, function()
+			Common.act(kind == "pass" and "buyPass" or "buyProduct", { key = it.key })
+		end, { Position = UDim2.new(1, -150, 0.5, -16), Size = UDim2.fromOffset(140, 32), color = Theme.info })
+		UI.setDisabled(b, owned or it.id == 0)
+	end
+	for _, g in ipairs(Monetization.gamepasses) do item("pass", g) end
+	for _, g in ipairs(Monetization.products) do item("product", g) end
+
+	UI.label(scroll, "<b>Factory theme</b> (cosmetic)", { Size = UDim2.new(1, -8, 0, 24), LayoutOrder = order + 1, TextSize = 16 })
+	local row = UI.frame(scroll, { BackgroundTransparency = 1, Size = UDim2.new(1, -8, 0, 40), LayoutOrder = order + 2 })
+	UI.listLayout(row, 8, Enum.FillDirection.Horizontal)
+	for id, th in pairs(Monetization.themes) do
+		local unlocked = th.requires == nil or d.owned[th.requires]
+		local b = UI.button(row, th.name .. (d.theme == id and " (active)" or ""), function() Common.act("setTheme", { theme = id }) end, {
+			Size = UDim2.fromOffset(170, 34), color = th.accent,
+		})
+		UI.setDisabled(b, not unlocked or d.theme == id, if not unlocked then th.name .. " (locked)" else nil)
+	end
+end
+
+function Page.render(content)
+	tabs(content)
+	local area = UI.frame(content, { BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 42), Size = UDim2.new(1, 0, 1, -42) })
+	if tab == "eggs" then eggsTab(area) elseif tab == "fusion" then fusionTab(area) else storeTab(area) end
+end
+
+return Page
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX33"><Properties><string name="Name">Factory</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Machines = require(Shared:WaitForChild("Machines"))
+local Creatures = require(Shared:WaitForChild("Creatures"))
+local Formulas = require(Shared:WaitForChild("Formulas"))
+local Format = require(Shared:WaitForChild("Format"))
+
+local Theme = require(script.Parent.Parent.Theme)
+local UI = require(script.Parent.Parent.UI)
+local State = require(script.Parent.Parent.State)
+local Common = require(script.Parent.Parent.Common)
+
+local Page = { id = "factory", title = "Factory" }
+
+function Page.render(content)
+	local d, st = State.data, State.stats
+	local scroll = UI.scroll(content, { Name = "Scroll" })
+
+	-- zone / expansion card
+	local zoneCard = UI.card(scroll, { Size = UDim2.new(1, -8, 0, 74), LayoutOrder = 0 })
+	UI.padding(zoneCard, 10)
+	local zone = Machines.zones[d.zone]
+	local nextZone = Machines.zones[d.zone + 1]
+	UI.label(zoneCard, string.format("<b>%s</b>  (Zone %d/%d)", zone.name, d.zone, #Machines.zones), { Size = UDim2.new(1, -190, 0, 22), TextSize = Theme.size.title - 2 })
+	if nextZone then
+		local unlocks = {}
+		for _, m in ipairs(Machines.list) do
+			if m.zone == nextZone.id then table.insert(unlocks, m.name) end
+		end
+		for _, e in ipairs(Creatures.eggs) do
+			if e.zone == nextZone.id then table.insert(unlocks, e.name) end
+		end
+		UI.label(zoneCard, "Next: " .. nextZone.name .. " - unlocks " .. (#unlocks > 0 and table.concat(unlocks, ", ") or "more space"), {
+			Position = UDim2.fromOffset(0, 24), Size = UDim2.new(1, -190, 0, 34), TextColor3 = Theme.textDim, TextSize = 13,
+		})
+		local b = UI.button(zoneCard, "Expand", function() Common.act("expandZone") end, {
+			Position = UDim2.new(1, -170, 0, 4), Size = UDim2.fromOffset(170, 52),
+		})
+		b.Text = "Expand\n" .. Common.costPlain("cash", nextZone.cost)
+		UI.setDisabled(b, State.value("cash") < nextZone.cost)
+	else
+		UI.label(zoneCard, "Your factory is fully expanded. Rebirth to grow stronger!", { Position = UDim2.fromOffset(0, 26), Size = UDim2.new(1, 0, 0, 24), TextColor3 = Theme.textDim })
+	end
+
+	for i, def in ipairs(Machines.list) do
+		local m = d.machines[def.id]
+		local el = Config.Elements[def.element]
+		local card = UI.card(scroll, { Size = UDim2.new(1, -8, 0, 104), LayoutOrder = i })
+		local bar = UI.frame(card, { BackgroundColor3 = def.color, Size = UDim2.new(0, 6, 1, -12), Position = UDim2.fromOffset(6, 6) })
+		UI.corner(bar, 3)
+		local title = UI.label(card, string.format("<b>%s</b>", def.name), { Position = UDim2.fromOffset(20, 6), Size = UDim2.new(1, -300, 0, 22), TextSize = 17, TextWrapped = false })
+		UI.label(card, string.format("<font color='#%s'>%s element</font>  |  makes %s", el.color:ToHex(), el.name, Common.resInfo[def.produces].name), {
+			Position = UDim2.fromOffset(20, 28), Size = UDim2.new(1, -300, 0, 18), TextSize = 12, TextColor3 = Theme.textDim, TextWrapped = false,
+		})
+		if m then
+			local info = st.machines[def.id]
+			local mult = Formulas.machineLevelMult(m.level)
+			local nextMult = Formulas.machineLevelMult(math.min(m.level + 1, Config.MachineMaxLevel))
+			local nextRate = if mult > 0 then info.rate * nextMult / mult else info.rate
+			UI.label(card, string.format("Lv <b>%d</b>  |  <font color='#%s'>+%s/s</font>  |  next level: +%s/s", m.level, Common.resInfo[def.produces].color:ToHex(), Format.rate(info.rate), Format.rate(nextRate - info.rate)), {
+				Position = UDim2.fromOffset(20, 48), Size = UDim2.new(1, -300, 0, 18), TextSize = 13, TextWrapped = false,
+			})
+			local names = {}
+			for _, uid in ipairs(info.assigned) do table.insert(names, Common.creatureName(d.creatures[uid])) end
+			UI.label(card, string.format("Creatures %d/%d: %s", #info.assigned, info.slots, #names > 0 and table.concat(names, ", ") or "<i>none (assign in Creatures)</i>"), {
+				Position = UDim2.fromOffset(20, 68), Size = UDim2.new(1, -300, 0, 32), TextSize = 12, TextColor3 = Theme.textDim,
+			})
+			local btnArea = UI.frame(card, { BackgroundTransparency = 1, Position = UDim2.new(1, -270, 0, 8), Size = UDim2.fromOffset(260, 88) })
+			UI.listLayout(btnArea, 6)
+			local function upgradeBtn(label, count)
+				local total, n = Formulas.upgradeBulk(def.id, m.level, st.upgradeDiscount, State.value("cash"), count)
+				local want = math.min(count, Config.MachineMaxLevel - m.level)
+				local shownCost = total
+				if n < want or n == 0 then
+					shownCost = 0
+					for k = 0, math.min(count, Config.MachineMaxLevel - m.level) - 1 do shownCost += Formulas.upgradeCost(def.id, m.level + k, st.upgradeDiscount) end
+				end
+				local b = UI.button(btnArea, "", function() Common.act("upgradeMachine", { id = def.id, count = count }, nil, true) end, { Size = UDim2.new(1, 0, 0, 40) })
+				if m.level >= Config.MachineMaxLevel then
+					b.Text = "MAX LEVEL"
+					UI.setDisabled(b, true)
+				else
+					b.Text = string.format("%s: %s", label, Common.costPlain("cash", shownCost))
+					UI.setDisabled(b, n < want)
+				end
+				return b
+			end
+			upgradeBtn("Upgrade x1", 1)
+			upgradeBtn("Upgrade x10", 10)
+		else
+			local locked = d.zone < def.zone
+			UI.label(card, def.desc, { Position = UDim2.fromOffset(20, 50), Size = UDim2.new(1, -300, 0, 40), TextSize = 13, TextColor3 = Theme.textDim })
+			local b = UI.button(card, "", function() Common.act("buyMachine", { id = def.id }) end, {
+				Position = UDim2.new(1, -230, 0.5, -24), Size = UDim2.fromOffset(220, 48),
+			})
+			if locked then
+				b.Text = "Requires " .. Machines.zones[def.zone].name
+				UI.setDisabled(b, true)
+			else
+				b.Text = "Build\n" .. Common.costPlain("cash", def.unlockCost)
+				UI.setDisabled(b, State.value("cash") < def.unlockCost)
+			end
+		end
+	end
+end
+
+return Page
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX34"><Properties><string name="Name">Index</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Creatures = require(Shared:WaitForChild("Creatures"))
+
+local Theme = require(script.Parent.Parent.Theme)
+local UI = require(script.Parent.Parent.UI)
+local State = require(script.Parent.Parent.State)
+local Common = require(script.Parent.Parent.Common)
+
+local Page = { id = "index", title = "Index" }
+
+local function sources(sp)
+	local out = {}
+	local def = Creatures.byId[sp]
+	for _, e in ipairs(Creatures.eggs) do
+		if (e.weights[def.rarity] or 0) > 0 then table.insert(out, e.name) end
+	end
+	for _, r in ipairs(Creatures.recipes) do
+		if r.result == sp then table.insert(out, "Fusion") break end
+	end
+	return table.concat(out, ", ")
+end
+
+function Page.render(content)
+	local d = State.data
+	local total = #Creatures.list * #Creatures.mutations
+	local found = 0
+	for _ in pairs(d.discovered) do found += 1 end
+	UI.label(content, string.format("Discovered <b>%d / %d</b> variants. Each first discovery pays a one-time bonus; mutated discoveries pay %dx.", found, total, Creatures.MutationDiscoveryMult), {
+		Size = UDim2.new(1, 0, 0, 22), TextSize = 14,
+	})
+	local scroll = UI.scroll(content, { Name = "Scroll", Position = UDim2.fromOffset(0, 26), Size = UDim2.new(1, 0, 1, -26) })
+	for i, def in ipairs(Creatures.list) do
+		local seenAny = false
+		for _, m in ipairs(Creatures.mutations) do
+			if d.discovered[def.id .. ":" .. m.id] then seenAny = true end
+		end
+		local rcol = Theme.rarity(def.rarity)
+		local card = UI.card(scroll, { Size = UDim2.new(1, -8, 0, 62), LayoutOrder = i })
+		local bar = UI.frame(card, { BackgroundColor3 = if seenAny then rcol else Theme.disabled, Size = UDim2.new(0, 6, 1, -12), Position = UDim2.fromOffset(6, 6) })
+		UI.corner(bar, 3)
+		local el = Config.Elements[def.element]
+		UI.label(card, if seenAny then string.format("<b><font color='#%s'>%s</font></b>  <font color='#%s'>%s - %s</font>", rcol:ToHex(), def.name, Theme.textDim:ToHex(), Config.Rarities[def.rarity].id, el.name) else "<b>???</b>", {
+			Position = UDim2.fromOffset(20, 6), Size = UDim2.new(0.5, -20, 0, 20), TextSize = 15, TextWrapped = false,
+		})
+		UI.label(card, if seenAny then ("Found in: " .. sources(def.id)) else "Undiscovered. Found in: " .. sources(def.id), {
+			Position = UDim2.fromOffset(20, 30), Size = UDim2.new(0.5, -20, 0, 28), TextSize = 12, TextColor3 = Theme.textDim,
+		})
+		local chips = UI.frame(card, { BackgroundTransparency = 1, AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -10, 0.5, 0), Size = UDim2.fromOffset(250, 44) })
+		UI.listLayout(chips, 4, Enum.FillDirection.Horizontal)
+		for _, m in ipairs(Creatures.mutations) do
+			local has = d.discovered[def.id .. ":" .. m.id]
+			local c = UI.frame(chips, { BackgroundColor3 = if has then m.color else Theme.bg, Size = UDim2.fromOffset(46, 44) })
+			UI.corner(c, 6)
+			UI.label(c, if has then m.name:sub(1, 4) else "?", {
+				Size = UDim2.fromScale(1, 1), TextXAlignment = Enum.TextXAlignment.Center, TextSize = 11,
+				TextColor3 = if has then Color3.fromRGB(20, 20, 30) else Theme.textDim, Font = Theme.fontBold, TextWrapped = false,
+			})
+		end
+	end
+end
+
+return Page
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX35"><Properties><string name="Name">Leaders</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Quests = require(Shared:WaitForChild("Quests"))
+local Format = require(Shared:WaitForChild("Format"))
+
+local Theme = require(script.Parent.Parent.Theme)
+local UI = require(script.Parent.Parent.UI)
+local State = require(script.Parent.Parent.State)
+local Common = require(script.Parent.Parent.Common)
+
+local Page = { id = "leaders", title = "Ranks" }
+local boardId = "cash"
+local requestedAt = -1000
+
+local function statsCard(scroll, d)
+	local card = UI.card(scroll, { Size = UDim2.new(1, -8, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 1 })
+	UI.padding(card, 10)
+	UI.listLayout(card, 3)
+	UI.label(card, "<b>Your statistics</b>", { Size = UDim2.new(1, 0, 0, 22), TextSize = 17 })
+	local achievements = 0
+	for _ in pairs(d.achievements) do achievements += 1 end
+	local lines = {
+		{ "Lifetime cash", Format.number(d.lifetimeCash) }, { "Cash this run", Format.number(d.runCash) },
+		{ "Rebirths", tostring(d.rebirths) }, { "Eggs hatched", Format.number(d.stats.hatched) },
+		{ "Fusions", Format.number(d.stats.fused) }, { "Machine upgrades", Format.number(d.stats.machineUpgrades) },
+		{ "Variants discovered", tostring(Quests.getStat(d, "discoveries")) }, { "Achievements", tostring(achievements) .. " / " .. #Quests.achievements },
+		{ "Research bought", tostring(d.stats.researchBought) }, { "Echoes earned (lifetime)", Format.number(d.echoesEarned) },
+	}
+	local grid = UI.frame(card, { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y })
+	local g = UI.new("UIGridLayout", { CellSize = UDim2.new(0.5, -6, 0, 20), CellPadding = UDim2.fromOffset(6, 2) }, grid)
+	for _, l in ipairs(lines) do
+		UI.label(grid, string.format("%s: <b>%s</b>", l[1], l[2]), { TextSize = 13, TextWrapped = false })
+	end
+end
+
+function Page.render(content)
+	local d = State.data
+	if os.clock() - requestedAt > 45 then
+		requestedAt = os.clock()
+		Common.act("leaderboards", {}, nil, true)
+	end
+	local scroll = UI.scroll(content, { Name = "Scroll" })
+	statsCard(scroll, d)
+
+	-- tabs
+	local tabs = UI.frame(scroll, { BackgroundTransparency = 1, Size = UDim2.new(1, -8, 0, 34), LayoutOrder = 2 })
+	UI.listLayout(tabs, 6, Enum.FillDirection.Horizontal)
+	local boards = State.leaderboards
+	if #boards == 0 then
+		UI.label(scroll, "Loading global rankings...", { Size = UDim2.new(1, -8, 0, 24), LayoutOrder = 3, TextColor3 = Theme.textDim })
+	end
+	for _, b in ipairs(boards) do
+		UI.button(tabs, b.name, function() boardId = b.id Common.refresh() end, {
+			Size = UDim2.fromOffset(140, 30), color = if boardId == b.id then Theme.accent else Theme.cardHi, textColor = if boardId == b.id then nil else Theme.text,
+		})
+	end
+	local online = {}
+	for _, plr in ipairs(Players:GetPlayers()) do online[plr.UserId] = plr end
+	for _, b in ipairs(boards) do
+		if b.id == boardId then
+			for rank, row in ipairs(b.rows) do
+				local card = UI.card(scroll, { Size = UDim2.new(1, -8, 0, 36), LayoutOrder = 10 + rank, BackgroundColor3 = if row.userId == Players.LocalPlayer.UserId then Theme.cardHi else Theme.card })
+				UI.label(card, "#" .. rank, { Position = UDim2.fromOffset(10, 0), Size = UDim2.fromOffset(44, 36), Font = Theme.fontBold, TextColor3 = if rank <= 3 then Theme.accent else Theme.textDim, TextWrapped = false })
+				UI.label(card, row.name, { Position = UDim2.fromOffset(56, 0), Size = UDim2.new(0.5, -60, 1, 0), TextWrapped = false })
+				UI.label(card, Format.number(row.value), { Position = UDim2.new(0.5, 0, 0, 0), Size = UDim2.new(0.25, 0, 1, 0), Font = Theme.fontBold, TextWrapped = false })
+			end
+		end
+	end
+
+	-- players in this server -> visit
+	UI.label(scroll, "<b>Players in this server</b> (visiting is view-only)", { Size = UDim2.new(1, -8, 0, 26), TextSize = 17, LayoutOrder = 100 })
+	local n = 0
+	for _, plr in ipairs(Players:GetPlayers()) do
+		n += 1
+		local card = UI.card(scroll, { Size = UDim2.new(1, -8, 0, 40), LayoutOrder = 100 + n })
+		UI.label(card, plr.DisplayName .. (plr == Players.LocalPlayer and " (you)" or ""), { Position = UDim2.fromOffset(12, 0), Size = UDim2.new(1, -150, 1, 0), TextWrapped = false })
+		if plr == Players.LocalPlayer then
+			UI.button(card, "Go home", function() Common.act("home") end, { Position = UDim2.new(1, -120, 0.5, -15), Size = UDim2.fromOffset(110, 30), color = Theme.good })
+		else
+			UI.button(card, "Visit", function() Common.act("visit", { userId = plr.UserId }) end, { Position = UDim2.new(1, -120, 0.5, -15), Size = UDim2.fromOffset(110, 30), color = Theme.info })
+		end
+	end
+end
+
+return Page
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX36"><Properties><string name="Name">QuestsPage</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Quests = require(Shared:WaitForChild("Quests"))
+local Format = require(Shared:WaitForChild("Format"))
+
+local Theme = require(script.Parent.Parent.Theme)
+local UI = require(script.Parent.Parent.UI)
+local State = require(script.Parent.Parent.State)
+local Common = require(script.Parent.Parent.Common)
+
+local Page = { id = "quests", title = "Quests" }
+
+local order = 0
+local function questRow(scroll, q, progress, claimed, canClaim, claimable)
+	order += 1
+	local card = UI.card(scroll, { Size = UDim2.new(1, -8, 0, 66), LayoutOrder = order })
+	local frac = math.clamp(progress / q.target, 0, 1)
+	UI.label(card, "<b>" .. q.name .. "</b>  -  " .. q.desc, { Position = UDim2.fromOffset(12, 5), Size = UDim2.new(1, -150, 0, 20), TextSize = 14, TextWrapped = false })
+	local bar = UI.progress(card, frac, if frac >= 1 then Theme.good else Theme.info)
+	bar.Position = UDim2.fromOffset(12, 30)
+	bar.Size = UDim2.new(1, -170, 0, 8)
+	UI.label(card, string.format("%s / %s   |   Reward: %s", Format.number(math.min(progress, q.target)), Format.number(q.target), Common.rewardText(q.reward)), {
+		Position = UDim2.fromOffset(12, 42), Size = UDim2.new(1, -150, 0, 18), TextSize = 12, TextColor3 = Theme.textDim, TextWrapped = false,
+	})
+	if claimable then
+		local b = UI.button(card, claimed and "Claimed" or "Claim", function() Common.act("claimQuest", { id = q.id }, nil, true) end, {
+			Position = UDim2.new(1, -120, 0.5, -16), Size = UDim2.fromOffset(110, 32), color = Theme.good,
+		})
+		UI.setDisabled(b, claimed or not canClaim)
+	end
+end
+
+local function heading(scroll, text)
+	order += 1
+	UI.label(scroll, "<b>" .. text .. "</b>", { Size = UDim2.new(1, -8, 0, 26), TextSize = 18, LayoutOrder = order })
+end
+
+function Page.render(content)
+	local d = State.data
+	order = 0
+	local scroll = UI.scroll(content, { Name = "Scroll" })
+
+	local step = Quests.tutorial[d.tutorial]
+	if step then
+		heading(scroll, string.format("Tutorial (step %d of %d)", d.tutorial, #Quests.tutorial))
+		local cur = Quests.getStat(d, step.stat)
+		questRow(scroll, step, cur, false, cur >= step.target, true)
+	end
+
+	heading(scroll, "Daily Quests")
+	local dq = d.quests.daily
+	for _, id in ipairs(dq.ids) do
+		local q = Quests.byId[id]
+		local cur = Quests.getStat(d, q.stat) - (dq.base[id] or 0)
+		questRow(scroll, q, cur, dq.claimed[id] == true, cur >= q.target, true)
+	end
+	UI.label(scroll, "Daily quests refresh at 00:00 UTC. Different quests reward different resources - mix up how you play.", { Size = UDim2.new(1, -8, 0, 18), TextSize = 12, TextColor3 = Theme.textDim, LayoutOrder = order + 1 })
+	order += 1
+
+	heading(scroll, "Repeatable")
+	for _, q in ipairs(Quests.repeatable) do
+		local cur = Quests.getStat(d, q.stat) - (d.quests.repeatBase[q.id] or 0)
+		questRow(scroll, q, cur, false, cur >= q.target, true)
+	end
+
+	heading(scroll, "Milestones")
+	for _, q in ipairs(Quests.milestones) do
+		local cur = Quests.getStat(d, q.stat)
+		local claimed = d.quests.claimed[q.id] == true
+		questRow(scroll, q, claimed and q.target or cur, claimed, cur >= q.target, true)
+	end
+
+	heading(scroll, "Achievements (rewards are granted automatically)")
+	for _, a in ipairs(Quests.achievements) do
+		local done = d.achievements[a.id] == true
+		questRow(scroll, a, done and a.target or Quests.getStat(d, a.stat), done, false, false)
+	end
+end
+
+return Page
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX37"><Properties><string name="Name">Rebirth</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Prestige = require(Shared:WaitForChild("Prestige"))
+local Machines = require(Shared:WaitForChild("Machines"))
+local Formulas = require(Shared:WaitForChild("Formulas"))
+local Format = require(Shared:WaitForChild("Format"))
+
+local Theme = require(script.Parent.Parent.Theme)
+local UI = require(script.Parent.Parent.UI)
+local State = require(script.Parent.Parent.State)
+local Common = require(script.Parent.Parent.Common)
+
+local Page = { id = "rebirth", title = "Rebirth" }
+
+local function bullets(parent, heading, color, lines, order)
+	local box = UI.card(parent, { Size = UDim2.new(1, -8, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = order })
+	UI.padding(box, 10)
+	UI.listLayout(box, 2)
+	UI.label(box, string.format("<font color='#%s'><b>%s</b></font>", color:ToHex(), heading), { Size = UDim2.new(1, 0, 0, 20), TextSize = 16 })
+	for _, l in ipairs(lines) do
+		UI.label(box, "- " .. l, { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextSize = 13 })
+	end
+end
+
+local function lostLines(d)
+	local keepZone = (d.prestige.r_zone or 0)
+	return {
+		"All Cash and Biomass",
+		"Every machine's level, and machines beyond the Ember Forge (you rebuild them)",
+		keepZone > 0 and string.format("Factory floors above zone %d (Keep Foundations keeps the rest)", 1 + keepZone) or "Factory expansions (back to the Starter Floor)",
+		"Creature levels and machine assignments (the creatures themselves are kept)",
+		"Egg price inflation resets (a perk, not a loss)",
+	}
+end
+
+local function keptLines()
+	return {
+		"All creatures, your Collection Index and discoveries",
+		"All Research and all Cores",
+		"Echoes, Echo upgrades, achievements and quest progress",
+		"Cosmetics, themes and purchases",
+	}
+end
+
+function Page.render(content)
+	local d = State.data
+	local pv = d.preview
+	local scroll = UI.scroll(content, { Name = "Scroll" })
+
+	local head = UI.card(scroll, { Size = UDim2.new(1, -8, 0, 128), LayoutOrder = 1 })
+	UI.padding(head, 12)
+	UI.label(head, string.format("<b>Rebirth #%d</b>", d.rebirths + 1), { Size = UDim2.new(1, -220, 0, 24), TextSize = 20 })
+	UI.label(head, string.format("Cash earned this run: %s / %s required   |   Factory zone: %d / %d required",
+		Format.number(pv.runCash), Format.number(pv.requirement), d.zone, Config.Rebirth.minZone), { Position = UDim2.fromOffset(0, 28), Size = UDim2.new(1, -220, 0, 20), TextSize = 13, TextColor3 = Theme.textDim, TextWrapped = false })
+	local bar = UI.progress(head, pv.runCash / pv.requirement, Theme.accent)
+	bar.Position = UDim2.fromOffset(0, 54)
+	bar.Size = UDim2.new(1, -220, 0, 12)
+	UI.label(head, string.format("You would gain: %s  (and +%d%% cash per Echo earned, permanently)", Common.money("echoes", pv.gain), Config.EchoPassiveBonus * 100), { Position = UDim2.fromOffset(0, 74), Size = UDim2.new(1, -220, 0, 40), TextSize = 14 })
+	local b = UI.button(head, "Rebirth...", function()
+		local lost = table.concat(lostLines(d), "\n- ")
+		local kept = table.concat(keptLines(), "\n- ")
+		Common.confirm("Confirm Rebirth", string.format("<b>You will gain:</b> %d Echoes\n\n<b>You will lose:</b>\n- %s\n\n<b>You keep:</b>\n- %s\n\nThis cannot be undone.", pv.gain, lost, kept), "Rebirth now", function()
+			Common.act("rebirth", { confirm = true })
+		end)
+	end, { Position = UDim2.new(1, -200, 0.5, -26), Size = UDim2.fromOffset(190, 52), color = Theme.bad, textColor = Color3.new(1, 1, 1) })
+	UI.setDisabled(b, not pv.can, if pv.can then nil else (pv.reason or "Not yet"))
+	if pv.can then b.TextColor3 = Color3.new(1, 1, 1) end
+
+	bullets(scroll, "You will lose", Theme.bad, lostLines(d), 2)
+	bullets(scroll, "You keep", Theme.good, keptLines(), 3)
+
+	UI.label(scroll, string.format("<b>Echo Upgrades</b>   Echoes: %s", Common.money("echoes", d.echoes)), { Size = UDim2.new(1, -8, 0, 28), TextSize = 18, LayoutOrder = 10 })
+	for i, u in ipairs(Prestige.upgrades) do
+		local lvl = d.prestige[u.id] or 0
+		local card = UI.card(scroll, { Size = UDim2.new(1, -8, 0, 58), LayoutOrder = 10 + i })
+		UI.label(card, string.format("<b>%s</b>  Lv %d/%d", u.name, lvl, u.max), { Position = UDim2.fromOffset(12, 5), Size = UDim2.new(1, -170, 0, 20), TextSize = 15, TextWrapped = false })
+		UI.label(card, u.desc, { Position = UDim2.fromOffset(12, 26), Size = UDim2.new(1, -170, 0, 28), TextSize = 12, TextColor3 = Theme.textDim })
+		local btn = UI.button(card, "", function() Common.act("buyPrestige", { id = u.id }) end, { Position = UDim2.new(1, -150, 0.5, -20), Size = UDim2.fromOffset(140, 40) })
+		if lvl >= u.max then
+			btn.Text = "MAX"
+			UI.setDisabled(btn, true)
+		else
+			local cost = Formulas.prestigeCost(u, lvl)
+			btn.Text = cost .. " Echoes"
+			UI.setDisabled(btn, d.echoes < cost)
+		end
+	end
+	UI.label(scroll, "<i>Advanced Prestige and Dimensions are designed as future layers on top of this system and are not part of this release.</i>", {
+		Size = UDim2.new(1, -8, 0, 36), TextSize = 12, TextColor3 = Theme.textDim, LayoutOrder = 100,
+	})
+end
+
+return Page
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX38"><Properties><string name="Name">Research</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Research = require(Shared:WaitForChild("Research"))
+local Format = require(Shared:WaitForChild("Format"))
+
+local Theme = require(script.Parent.Parent.Theme)
+local UI = require(script.Parent.Parent.UI)
+local State = require(script.Parent.Parent.State)
+local Common = require(script.Parent.Parent.Common)
+
+local Page = { id = "research", title = "Research" }
+
+-- Mirrors Engine.researchStatus for display only; the server re-validates every purchase.
+local function status(d, node)
+	if d.research[node.id] then return "owned" end
+	for _, ex in ipairs(node.exclusive or {}) do
+		if d.research[ex] then return "excluded", "Locked out by " .. Research.byId[ex].name end
+	end
+	for _, r in ipairs(node.requires or {}) do
+		if not d.research[r] then return "locked", "Requires " .. Research.byId[r].name end
+	end
+	if node.anyOf then
+		local any = false
+		for _, r in ipairs(node.anyOf) do if d.research[r] then any = true end end
+		if not any then return "locked", "Requires " .. Research.byId[node.anyOf[1]].name .. " or " .. Research.byId[node.anyOf[2]].name end
+	end
+	return "available"
+end
+
+function Page.render(content)
+	local d = State.data
+	UI.label(content, string.format("Cores: %s   |   Research persists through rebirth. Some nodes are <b>exclusive</b> - choose your specialization!", Common.money("cores", State.value("cores"))), {
+		Size = UDim2.new(1, 0, 0, 22), TextSize = 13,
+	})
+	local scroll = UI.scroll(content, { Name = "Scroll", Position = UDim2.fromOffset(0, 26), Size = UDim2.new(1, 0, 1, -26) })
+	for bi, branch in ipairs(Research.branches) do
+		local head = UI.label(scroll, string.format("<font color='#%s'><b>%s</b></font>", branch.color:ToHex(), branch.name), { Size = UDim2.new(1, -8, 0, 26), TextSize = 18, LayoutOrder = bi * 100 })
+		local n = 0
+		for _, node in ipairs(Research.nodes) do
+			if node.branch == branch.id then
+				n += 1
+				local s, why = status(d, node)
+				local card = UI.card(scroll, { Size = UDim2.new(1, -8, 0, 62), LayoutOrder = bi * 100 + n, BackgroundColor3 = if s == "owned" then Color3.fromRGB(28, 56, 44) else Theme.card })
+				if s == "owned" or s == "available" then UI.stroke(card, branch.color, 1.5) end
+				UI.label(card, "<b>" .. node.name .. "</b>" .. (s == "owned" and "  (researched)" or ""), { Position = UDim2.fromOffset(12, 5), Size = UDim2.new(1, -170, 0, 20), TextSize = 15, TextWrapped = false })
+				UI.label(card, node.desc, { Position = UDim2.fromOffset(12, 26), Size = UDim2.new(1, -170, 0, 32), TextSize = 12, TextColor3 = Theme.textDim })
+				if s ~= "owned" then
+					local b = UI.button(card, "", function() Common.act("buyResearch", { id = node.id }) end, { Position = UDim2.new(1, -150, 0.5, -22), Size = UDim2.fromOffset(140, 44) })
+					if s == "available" then
+						b.Text = Format.number(node.cost) .. " Cores"
+						UI.setDisabled(b, State.value("cores") < node.cost)
+					else
+						b.Text = why
+						b.TextSize = 11
+						UI.setDisabled(b, true)
+					end
+				end
+			end
+		end
+	end
+end
+
+return Page
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX39"><Properties><string name="Name">Settings</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+
+local Theme = require(script.Parent.Parent.Theme)
+local UI = require(script.Parent.Parent.UI)
+local State = require(script.Parent.Parent.State)
+local Common = require(script.Parent.Parent.Common)
+
+local Page = { id = "settings", title = "Settings" }
+
+local function toggle(scroll, order, title, desc, key, value, locked)
+	local card = UI.card(scroll, { Size = UDim2.new(1, -8, 0, 58), LayoutOrder = order })
+	UI.label(card, "<b>" .. title .. "</b>", { Position = UDim2.fromOffset(12, 5), Size = UDim2.new(1, -170, 0, 20), TextSize = 15, TextWrapped = false })
+	UI.label(card, desc, { Position = UDim2.fromOffset(12, 26), Size = UDim2.new(1, -170, 0, 28), TextSize = 12, TextColor3 = Theme.textDim })
+	local b = UI.button(card, if locked then "Locked" elseif value then "ON" else "OFF", function()
+		Common.act("setSetting", { key = key, value = not value }, nil, true)
+	end, { Position = UDim2.new(1, -140, 0.5, -16), Size = UDim2.fromOffset(130, 32), color = if value then Theme.good else Theme.cardHi, textColor = if value then nil else Theme.text })
+	UI.setDisabled(b, locked)
+end
+
+function Page.render(content)
+	local d, st = State.data, State.stats
+	local scroll = UI.scroll(content, { Name = "Scroll" })
+	toggle(scroll, 1, "Notifications", "Reward and unlock toasts. Errors are always shown.", "notifications", d.settings.notifications ~= false, false)
+	toggle(scroll, 2, "Auto-Upgrader", st.flags.autoUpgrade and "Automatically buys the cheapest affordable machine upgrade." or "Research 'Auto-Upgrader' (Automation branch) to unlock.", "autoUpgrade", d.settings.autoUpgrade == true, not st.flags.autoUpgrade)
+	local home = UI.card(scroll, { Size = UDim2.new(1, -8, 0, 58), LayoutOrder = 3 })
+	UI.label(home, "<b>Teleport to my factory</b>", { Position = UDim2.fromOffset(12, 5), Size = UDim2.new(1, -170, 0, 20), TextSize = 15 })
+	UI.label(home, "Lost? Jump back to your plot.", { Position = UDim2.fromOffset(12, 28), Size = UDim2.new(1, -170, 0, 20), TextSize = 12, TextColor3 = Theme.textDim })
+	UI.button(home, "Go home", function() Common.act("home") end, { Position = UDim2.new(1, -140, 0.5, -16), Size = UDim2.fromOffset(130, 32), color = Theme.info })
+	UI.label(scroll, string.format("<b>%s</b>\nTips: walk up to a machine in your factory and press E to build or upgrade it. Matching a creature's element to its machine gives full power; mismatches work at %d%%. Your progress autosaves every %ds and when you leave.",
+		Config.GameName, Config.IncompatibleEfficiency * 100, Config.AutoSaveSeconds), {
+		Size = UDim2.new(1, -8, 0, 80), LayoutOrder = 4, TextSize = 13, TextColor3 = Theme.textDim,
+	})
+end
+
+return Page
+]]></ProtectedString></Properties></Item></Item><Item class="ModuleScript" referent="RBX41"><Properties><string name="Name">State</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Client-side mirror of the server profile. Read-only: all changes happen by asking the server.
+-- Rates are derived with the SAME shared Stats module the server uses, so displayed numbers match.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Stats = require(Shared:WaitForChild("Stats"))
+local Remotes = require(Shared:WaitForChild("Remotes"))
+
+local State = {}
+
+State.data = nil
+State.stats = nil
+State.ready = false
+State.leaderboards = {}
+
+local listeners = {}
+local tickListeners = {}
+local base = { cash = 0, biomass = 0, cores = 0, echoes = 0, runCash = 0 }
+local baseClock = os.clock()
+local remotes = Remotes.get()
+State.remotes = remotes
+
+function State.onChange(fn)
+	table.insert(listeners, fn)
+end
+
+function State.onTick(fn)
+	table.insert(tickListeners, fn)
+end
+
+local function fire(list)
+	for _, fn in ipairs(list) do
+		task.spawn(fn)
+	end
+end
+
+remotes.Sync.OnClientEvent:Connect(function(snap)
+	State.data = snap
+	State.stats = Stats.compute(snap, snap.event)
+	for k in pairs(base) do
+		base[k] = snap[k]
+	end
+	baseClock = os.clock()
+	State.ready = true
+	fire(listeners)
+end)
+
+remotes.Tick.OnClientEvent:Connect(function(t)
+	if not State.data then
+		return
+	end
+	for k, v in pairs(t) do
+		base[k] = v
+		State.data[k] = v
+	end
+	baseClock = os.clock()
+	fire(tickListeners)
+end)
+
+--- Smoothly interpolated resource value (server remains authoritative).
+function State.value(res)
+	local v = base[res] or 0
+	local rate = State.stats and State.stats.rates[res]
+	if rate then
+		v += rate * math.min(os.clock() - baseClock, 2)
+	end
+	return v
+end
+
+function State.rate(res)
+	return State.stats and State.stats.rates[res] or 0
+end
+
+--- Asks the server to do something. Returns ok, message, data.
+function State.request(action, args)
+	local ok, res = pcall(function()
+		return remotes.Request:InvokeServer(action, args or {})
+	end)
+	if not ok or type(res) ~= "table" then
+		return false, "Connection problem", nil
+	end
+	return res.ok, res.msg, res.data
+end
+
+return State
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX42"><Properties><string name="Name">Theme</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Visual system: one palette, one type scale, rarity colours from shared Config.
+
+local Config = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("Config"))
+
+local Theme = {}
+
+Theme.bg = Color3.fromRGB(14, 17, 27)
+Theme.panel = Color3.fromRGB(22, 27, 42)
+Theme.card = Color3.fromRGB(31, 38, 58)
+Theme.cardHi = Color3.fromRGB(41, 50, 76)
+Theme.stroke = Color3.fromRGB(58, 70, 104)
+Theme.text = Color3.fromRGB(235, 240, 255)
+Theme.textDim = Color3.fromRGB(150, 160, 190)
+Theme.accent = Color3.fromRGB(255, 176, 56)
+Theme.good = Color3.fromRGB(74, 205, 120)
+Theme.bad = Color3.fromRGB(235, 90, 90)
+Theme.info = Color3.fromRGB(80, 160, 255)
+Theme.disabled = Color3.fromRGB(58, 64, 82)
+
+Theme.font = Enum.Font.GothamMedium
+Theme.fontBold = Enum.Font.GothamBold
+
+Theme.size = { small = 13, body = 15, title = 20, huge = 26 }
+
+function Theme.rarity(i: number): Color3
+	return Config.Rarities[i].color
+end
+
+return Theme
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX43"><Properties><string name="Name">UI</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+-- Small immediate-style UI toolkit on top of Roblox GuiObjects (no external deps).
+
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+
+local Theme = require(script.Parent.Theme)
+
+local UI = {}
+
+UI.pressing = false
+UserInputService.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		UI.pressing = true
+	end
+end)
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		UI.pressing = false
+	end
+end)
+
+function UI.new(class, props, parent)
+	local inst = Instance.new(class)
+	for k, v in pairs(props or {}) do
+		inst[k] = v
+	end
+	inst.Parent = parent
+	return inst
+end
+
+function UI.corner(inst, radius)
+	return UI.new("UICorner", { CornerRadius = UDim.new(0, radius or 8) }, inst)
+end
+
+function UI.stroke(inst, color, thickness)
+	return UI.new("UIStroke", { Color = color or Theme.stroke, Thickness = thickness or 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, inst)
+end
+
+function UI.padding(inst, px)
+	return UI.new("UIPadding", {
+		PaddingLeft = UDim.new(0, px), PaddingRight = UDim.new(0, px),
+		PaddingTop = UDim.new(0, px), PaddingBottom = UDim.new(0, px),
+	}, inst)
+end
+
+function UI.listLayout(inst, gap, direction)
+	return UI.new("UIListLayout", {
+		Padding = UDim.new(0, gap or 6),
+		FillDirection = direction or Enum.FillDirection.Vertical,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}, inst)
+end
+
+function UI.frame(parent, props)
+	local p = { BackgroundColor3 = Theme.card, BorderSizePixel = 0 }
+	for k, v in pairs(props or {}) do
+		p[k] = v
+	end
+	return UI.new("Frame", p, parent)
+end
+
+function UI.card(parent, props)
+	local f = UI.frame(parent, props)
+	UI.corner(f, 10)
+	UI.stroke(f)
+	return f
+end
+
+function UI.label(parent, text, props)
+	local p = {
+		BackgroundTransparency = 1,
+		Text = text,
+		TextColor3 = Theme.text,
+		Font = Theme.font,
+		TextSize = Theme.size.body,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextWrapped = true,
+		RichText = true,
+	}
+	for k, v in pairs(props or {}) do
+		p[k] = v
+	end
+	return UI.new("TextLabel", p, parent)
+end
+
+function UI.setDisabled(btn, disabled, reason)
+	btn:SetAttribute("Disabled", disabled)
+	local base = btn:GetAttribute("BaseColor") or Theme.accent
+	btn.BackgroundColor3 = if disabled then Theme.disabled else base
+	btn.TextColor3 = if disabled then Theme.textDim else (btn:GetAttribute("TextOn") or Color3.fromRGB(25, 20, 10))
+	if reason then
+		btn.Text = reason
+	end
+end
+
+--- onClick runs only when not disabled. props.color changes the base colour.
+function UI.button(parent, text, onClick, props)
+	local color = props and props.color or Theme.accent
+	local textOn = props and props.textColor or Color3.fromRGB(25, 20, 10)
+	local p = {
+		AutoButtonColor = false,
+		BackgroundColor3 = color,
+		Text = text,
+		TextColor3 = textOn,
+		Font = Theme.fontBold,
+		TextSize = Theme.size.body,
+		BorderSizePixel = 0,
+		Size = UDim2.fromOffset(100, 32),
+		TextWrapped = true,
+	}
+	for k, v in pairs(props or {}) do
+		if k ~= "color" and k ~= "textColor" then
+			p[k] = v
+		end
+	end
+	local btn = UI.new("TextButton", p, parent)
+	btn:SetAttribute("BaseColor", color)
+	btn:SetAttribute("TextOn", textOn)
+	UI.corner(btn, 8)
+	btn.MouseEnter:Connect(function()
+		if not btn:GetAttribute("Disabled") then
+			btn.BackgroundColor3 = color:Lerp(Color3.new(1, 1, 1), 0.18)
+		end
+	end)
+	btn.MouseLeave:Connect(function()
+		if not btn:GetAttribute("Disabled") then
+			btn.BackgroundColor3 = color
+		end
+	end)
+	btn.Activated:Connect(function()
+		if btn:GetAttribute("Disabled") then
+			return
+		end
+		onClick()
+	end)
+	return btn
+end
+
+function UI.scroll(parent, props)
+	local p = {
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 5,
+		ScrollBarImageColor3 = Theme.stroke,
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		CanvasSize = UDim2.new(),
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		Size = UDim2.fromScale(1, 1),
+	}
+	for k, v in pairs(props or {}) do
+		p[k] = v
+	end
+	local s = UI.new("ScrollingFrame", p, parent)
+	UI.listLayout(s, 8)
+	return s
+end
+
+function UI.progress(parent, frac, color, props)
+	local bar = UI.frame(parent, { BackgroundColor3 = Theme.bg, Size = UDim2.new(1, 0, 0, 10) })
+	for k, v in pairs(props or {}) do
+		bar[k] = v
+	end
+	UI.corner(bar, 5)
+	local fill = UI.frame(bar, { BackgroundColor3 = color or Theme.good, Size = UDim2.fromScale(math.clamp(frac, 0, 1), 1) })
+	UI.corner(fill, 5)
+	return bar
+end
+
+function UI.tween(inst, info, goal)
+	local t = TweenService:Create(inst, info, goal)
+	t:Play()
+	return t
+end
+
+--- A tag/pill label.
+function UI.pill(parent, text, color, props)
+	local l = UI.label(parent, text, {
+		AutomaticSize = Enum.AutomaticSize.XY,
+		BackgroundTransparency = 0.7,
+		BackgroundColor3 = color,
+		TextColor3 = color:Lerp(Color3.new(1, 1, 1), 0.5),
+		Font = Theme.fontBold,
+		TextSize = Theme.size.small,
+		TextWrapped = false,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Size = UDim2.fromOffset(0, 20),
+	})
+	if props then
+		for k, v in pairs(props) do l[k] = v end
+	end
+	l.Parent = parent
+	UI.corner(l, 10)
+	UI.padding(l, 5)
+	return l
+end
+
+function UI.hex(c)
+	return c:ToHex()
+end
+
+return UI
+]]></ProtectedString></Properties></Item></Item></Item></Item></roblox>
