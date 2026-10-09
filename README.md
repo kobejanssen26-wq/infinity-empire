@@ -6,6 +6,10 @@ whole project structure here is new).
 
 ## Run it in Roblox Studio
 
+**Easiest (no Rojo):** download `Eclipse.rbxlx` from this repo (open the file on GitHub, click *Download raw file*), double-click it to open in Studio, and press Play. Regenerate it after code changes with `python3 tools/build_rbxlx.py`.
+
+**With Rojo (for development):**
+
 1. Install [Rojo](https://rojo.space/docs/v7/getting-started/installation/) (7.x) and its Studio plugin.
 2. `rojo build -o Eclipse.rbxlx` then open `Eclipse.rbxlx` in Studio - **or** `rojo serve` and click *Connect* in the plugin on an empty Baseplate place.
 3. Delete the template Baseplate and SpawnLocation if you used one (the server builds its own ground).
