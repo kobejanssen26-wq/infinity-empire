@@ -13,8 +13,8 @@ def ref():
 def cdata(s):
     return "<![CDATA[" + s.replace("]]>", "]]]]><![CDATA[>") + "]]>"
 
-def item(cls, name, source=None, children=""):
-    props = '<string name="Name">%s</string>' % escape(name)
+def item(cls, name, source=None, children="", extra=""):
+    props = '<string name="Name">%s</string>' % escape(name) + extra
     if source is not None:
         props += '<ProtectedString name="Source">%s</ProtectedString>' % cdata(source)
     return '<Item class="%s" referent="%s"><Properties>%s</Properties>%s</Item>' % (cls, ref(), props, children)
@@ -36,9 +36,15 @@ def folder(src, name):
     p = root / "src" / src
     return item("Folder", name, None, "".join(node(c) for c in sorted(p.iterdir()) if c.is_dir() or c.suffix == ".lua"))
 
+baseplate = item("Part", "Baseplate", None, "", (
+    '<bool name="Anchored">true</bool>'
+    '<Vector3 name="size"><X>2048</X><Y>4</Y><Z>2048</Z></Vector3>'
+    '<CoordinateFrame name="CFrame"><X>255</X><Y>-12</Y><Z>255</Z>'
+    '<R00>1</R00><R01>0</R01><R02>0</R02><R10>0</R10><R11>1</R11><R12>0</R12><R20>0</R20><R21>0</R21><R22>1</R22></CoordinateFrame>'
+    '<int name="Color3uint8">4285098345</int>'))
 parts = [
-    item("Workspace", "Workspace"),
-    item("Lighting", "Lighting"),
+    item("Workspace", "Workspace", None, baseplate),
+    item("Lighting", "Lighting", None, "", '<float name="Brightness">2</float><float name="ClockTime">14</float>'),
     item("ReplicatedStorage", "ReplicatedStorage", None, folder("shared", "Shared")),
     item("ServerScriptService", "ServerScriptService", None, folder("server", "Server")),
     item("StarterPlayer", "StarterPlayer", None,

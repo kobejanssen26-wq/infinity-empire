@@ -1,4 +1,4 @@
-<roblox version="4"><Item class="Workspace" referent="RBX1"><Properties><string name="Name">Workspace</string></Properties></Item><Item class="Lighting" referent="RBX2"><Properties><string name="Name">Lighting</string></Properties></Item><Item class="ReplicatedStorage" referent="RBX15"><Properties><string name="Name">ReplicatedStorage</string></Properties><Item class="Folder" referent="RBX14"><Properties><string name="Name">Shared</string></Properties><Item class="ModuleScript" referent="RBX3"><Properties><string name="Name">Config</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+<roblox version="4"><Item class="Workspace" referent="RBX2"><Properties><string name="Name">Workspace</string></Properties><Item class="Part" referent="RBX1"><Properties><string name="Name">Baseplate</string><bool name="Anchored">true</bool><Vector3 name="size"><X>2048</X><Y>4</Y><Z>2048</Z></Vector3><CoordinateFrame name="CFrame"><X>255</X><Y>-12</Y><Z>255</Z><R00>1</R00><R01>0</R01><R02>0</R02><R10>0</R10><R11>1</R11><R12>0</R12><R20>0</R20><R21>0</R21><R22>1</R22></CoordinateFrame><int name="Color3uint8">4285098345</int></Properties></Item></Item><Item class="Lighting" referent="RBX3"><Properties><string name="Name">Lighting</string><float name="Brightness">2</float><float name="ClockTime">14</float></Properties></Item><Item class="ReplicatedStorage" referent="RBX16"><Properties><string name="Name">ReplicatedStorage</string></Properties><Item class="Folder" referent="RBX15"><Properties><string name="Name">Shared</string></Properties><Item class="ModuleScript" referent="RBX4"><Properties><string name="Name">Config</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Global tuning constants. Everything numeric that designers may want to change lives here
 -- or in the per-domain config modules (Creatures, Machines, Research, Prestige, Quests).
 
@@ -87,7 +87,7 @@ Config.ActionCost = {
 }
 
 return Config
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX4"><Properties><string name="Name">Creatures</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX5"><Properties><string name="Name">Creatures</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Creature, mutation, trait, egg and fusion data. Pure data: add rows to extend the game.
 
 local Creatures = {}
@@ -197,7 +197,7 @@ Creatures.DiscoveryReward = {
 Creatures.MutationDiscoveryMult = 3
 
 return Creatures
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX5"><Properties><string name="Name">Format</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX6"><Properties><string name="Name">Format</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 local Format = {}
 
 local suffixes = { "", "K", "M", "B", "T", "Qa", "Qi" }
@@ -251,7 +251,7 @@ function Format.duration(sec: number): string
 end
 
 return Format
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX6"><Properties><string name="Name">Formulas</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX7"><Properties><string name="Name">Formulas</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Pure cost / scaling formulas. Shared by client (display) and server (authority).
 
 local Config = require(script.Parent.Config)
@@ -345,7 +345,7 @@ function Formulas.zoneCost(zone: number): number
 end
 
 return Formulas
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX7"><Properties><string name="Name">Machines</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX8"><Properties><string name="Name">Machines</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Machine templates. Add a table to `list` to add a machine; nothing else needs to change.
 -- produces: resource id. baseRate: units/sec at level 1. upgrade cost = upBase * upGrowth^level (cash).
 -- unlockCost: cash to build. zone: factory zone required. pos: layout offset (studs) from plot center.
@@ -400,7 +400,7 @@ Machines.zones = {
 }
 
 return Machines
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX8"><Properties><string name="Name">Monetization</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX9"><Properties><string name="Name">Monetization</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Optional Robux items. IDs of 0 are "not configured": the shop hides them and purchases are refused.
 -- Fill in real IDs from the Creator Dashboard. Nothing here sells raw progression power:
 --   * gamepasses are convenience (inventory) or cosmetic (themes)
@@ -425,7 +425,7 @@ Monetization.themes = {
 }
 
 return Monetization
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX9"><Properties><string name="Name">Prestige</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX10"><Properties><string name="Name">Prestige</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Rebirth upgrades bought with Echoes. level scaling: cost = base * growth^level.
 -- kind drives how Stats/Engine interpret `perLevel`.
 
@@ -446,7 +446,7 @@ for _, u in ipairs(Prestige.upgrades) do
 end
 
 return Prestige
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX10"><Properties><string name="Name">Quests</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX11"><Properties><string name="Name">Quests</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Quest / achievement / event framework data. Progress is derived from profile stats:
 --   Quests.getStat(profile, statName)  -> number
 -- kinds: tutorial (ordered, absolute), daily (rolled per UTC day, delta), repeat (delta, resets on claim),
@@ -585,7 +585,7 @@ function Quests.rollDaily(dayNumber: number): { string }
 end
 
 return Quests
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX11"><Properties><string name="Name">Remotes</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX12"><Properties><string name="Name">Remotes</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Network surface. The server creates these instances; the client waits for them.
 -- Client -> server goes through ONE RemoteFunction ("Request") with a whitelisted action name;
 -- server -> client uses the RemoteEvents below. Nothing else is exposed.
@@ -631,7 +631,7 @@ function Remotes.get(): { [string]: any }
 end
 
 return Remotes
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX12"><Properties><string name="Name">Research</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX13"><Properties><string name="Name">Research</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Research tree. Cost in cores. requires = all of; anyOf = at least one of; exclusive = locks out these nodes.
 -- effects keys (additive unless noted): cashMult biomassMult coreMult creaturePower mutationLuck
 --   upgradeDiscount fusionDiscount echoMult slotBonus offlineHours machineMult.<id>
@@ -688,7 +688,7 @@ for _, n in ipairs(Research.nodes) do
 end
 
 return Research
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX13"><Properties><string name="Name">Stats</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX14"><Properties><string name="Name">Stats</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Derives every multiplier and production rate from a profile. Pure: the server uses it for
 -- authoritative production; the client uses the same function to display exact rates.
 
@@ -843,7 +843,7 @@ function Stats.compute(p: any, event: any?): any
 end
 
 return Stats
-]]></ProtectedString></Properties></Item></Item></Item><Item class="ServerScriptService" referent="RBX28"><Properties><string name="Name">ServerScriptService</string></Properties><Item class="Folder" referent="RBX27"><Properties><string name="Name">Server</string></Properties><Item class="Folder" referent="RBX18"><Properties><string name="Name">Logic</string></Properties><Item class="ModuleScript" referent="RBX16"><Properties><string name="Name">Engine</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item></Item></Item><Item class="ServerScriptService" referent="RBX29"><Properties><string name="Name">ServerScriptService</string></Properties><Item class="Folder" referent="RBX28"><Properties><string name="Name">Server</string></Properties><Item class="Folder" referent="RBX19"><Properties><string name="Name">Logic</string></Properties><Item class="ModuleScript" referent="RBX17"><Properties><string name="Name">Engine</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Pure, Roblox-service-free game rules. Every state change a player can cause goes through here.
 -- Functions take the player profile `p` and a ctx = { now: number, rng: Random-like, notify: ((string, any) -> ())? }
 -- and return (ok: boolean, message: string, data: any?).
@@ -1568,7 +1568,7 @@ function Engine.setTheme(p: any, theme: any, ctx: Ctx): (boolean, string, any?)
 end
 
 return Engine
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX17"><Properties><string name="Name">Shared</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX18"><Properties><string name="Name">Shared</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Single place where server code reaches the shared (ReplicatedStorage) modules.
 -- tools/stage_tests.py replaces this file with a flat-require stub for out-of-Roblox unit tests.
 
@@ -1587,7 +1587,7 @@ return {
 	Monetization = require(Shared:WaitForChild("Monetization")),
 	Format = require(Shared:WaitForChild("Format")),
 }
-]]></ProtectedString></Properties></Item></Item><Item class="Script" referent="RBX19"><Properties><string name="Name">Main</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item></Item><Item class="Script" referent="RBX20"><Properties><string name="Name">Main</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 -- ECLIPSE: INFINITE EMPIRE - server bootstrap and main loop.
 
 local Players = game:GetService("Players")
@@ -1751,7 +1751,7 @@ task.spawn(function()
 		LeaderboardService.refresh()
 	end
 end)
-]]></ProtectedString></Properties></Item><Item class="Folder" referent="RBX26"><Properties><string name="Name">Services</string></Properties><Item class="ModuleScript" referent="RBX20"><Properties><string name="Name">DataService</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="Folder" referent="RBX27"><Properties><string name="Name">Services</string></Properties><Item class="ModuleScript" referent="RBX21"><Properties><string name="Name">DataService</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Persistence: session-locked DataStore profiles with retries, autosave and shutdown saving.
 -- Profile shape lives in Logic/Engine.lua (newProfile / migrate). Keys starting with "_" are runtime-only.
 
@@ -1940,7 +1940,7 @@ function DataService.start()
 end
 
 return DataService
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX21"><Properties><string name="Name">LeaderboardService</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX22"><Properties><string name="Name">LeaderboardService</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Global leaderboards via OrderedDataStores. Writes are throttled; reads are cached and broadcast.
 
 local DataStoreService = game:GetService("DataStoreService")
@@ -2029,7 +2029,7 @@ function LeaderboardService.snapshot(): any
 end
 
 return LeaderboardService
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX22"><Properties><string name="Name">PlotService</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX23"><Properties><string name="Name">PlotService</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Builds and maintains each player's procedural factory plot. Purely presentational: it reads the
 -- (server-authoritative) profile and never changes it. Prompt interactions are forwarded to a callback
 -- that goes through the same Engine validation as any remote request.
@@ -2397,7 +2397,7 @@ function PlotService.moveCharacter(player: Player, cf: CFrame?)
 end
 
 return PlotService
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX23"><Properties><string name="Name">PurchaseService</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX24"><Properties><string name="Name">PurchaseService</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Robux purchases. Grants happen ONLY here, on the server, from Roblox's own receipt / pass events.
 -- Items whose id is 0 in Shared/Monetization.lua are treated as "not configured" and cannot be bought.
 
@@ -2513,7 +2513,7 @@ function PurchaseService.start()
 end
 
 return PurchaseService
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX24"><Properties><string name="Name">Router</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX25"><Properties><string name="Name">Router</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 -- The single client->server entry point. Every request is: rate-limited, resolved to a whitelisted
 -- action, argument-validated, executed by the pure Engine (which re-validates all game rules),
 -- then followed by an achievement check and a batched state sync.
@@ -2685,7 +2685,7 @@ function Router.onPrompt(player: Player, machineId: string)
 end
 
 return Router
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX25"><Properties><string name="Name">Session</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX26"><Properties><string name="Name">Session</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Per-player runtime glue: engine context, state replication (batched), notifications and announcements.
 
 local MessagingService = game:GetService("MessagingService")
@@ -2820,7 +2820,7 @@ function Session.updateLeaderstats(player: Player, p: any)
 end
 
 return Session
-]]></ProtectedString></Properties></Item></Item></Item></Item><Item class="StarterPlayer" referent="RBX46"><Properties><string name="Name">StarterPlayer</string></Properties><Item class="StarterPlayerScripts" referent="RBX45"><Properties><string name="Name">StarterPlayerScripts</string></Properties><Item class="Folder" referent="RBX44"><Properties><string name="Name">Client</string></Properties><Item class="ModuleScript" referent="RBX29"><Properties><string name="Name">Common</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item></Item></Item></Item><Item class="StarterPlayer" referent="RBX47"><Properties><string name="Name">StarterPlayer</string></Properties><Item class="StarterPlayerScripts" referent="RBX46"><Properties><string name="Name">StarterPlayerScripts</string></Properties><Item class="Folder" referent="RBX45"><Properties><string name="Name">Client</string></Properties><Item class="ModuleScript" referent="RBX30"><Properties><string name="Name">Common</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Shared client helpers: formatting, toasts, modals and server-action wrappers.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -3022,7 +3022,7 @@ function Common.menu(anchor, options)
 end
 
 return Common
-]]></ProtectedString></Properties></Item><Item class="LocalScript" referent="RBX30"><Properties><string name="Name">Main</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="LocalScript" referent="RBX31"><Properties><string name="Name">Main</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 -- ECLIPSE: INFINITE EMPIRE - client bootstrap: HUD, navigation, page manager, server notifications.
 
 local Players = game:GetService("Players")
@@ -3359,7 +3359,7 @@ end)
 
 State.onChange(function() State.syncClock = os.clock() end)
 
-]]></ProtectedString></Properties></Item><Item class="Folder" referent="RBX40"><Properties><string name="Name">Pages</string></Properties><Item class="ModuleScript" referent="RBX31"><Properties><string name="Name">Creatures</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="Folder" referent="RBX41"><Properties><string name="Name">Pages</string></Properties><Item class="ModuleScript" referent="RBX32"><Properties><string name="Name">Creatures</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
@@ -3494,7 +3494,7 @@ function Page.render(content)
 end
 
 return Page
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX32"><Properties><string name="Name">Eggs</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX33"><Properties><string name="Name">Eggs</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
@@ -3634,7 +3634,7 @@ function Page.render(content)
 end
 
 return Page
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX33"><Properties><string name="Name">Factory</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX34"><Properties><string name="Name">Factory</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
@@ -3743,7 +3743,7 @@ function Page.render(content)
 end
 
 return Page
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX34"><Properties><string name="Name">Index</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX35"><Properties><string name="Name">Index</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
@@ -3808,7 +3808,7 @@ function Page.render(content)
 end
 
 return Page
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX35"><Properties><string name="Name">Leaders</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX36"><Properties><string name="Name">Leaders</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -3895,7 +3895,7 @@ function Page.render(content)
 end
 
 return Page
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX36"><Properties><string name="Name">QuestsPage</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX37"><Properties><string name="Name">QuestsPage</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Quests = require(Shared:WaitForChild("Quests"))
@@ -3976,7 +3976,7 @@ function Page.render(content)
 end
 
 return Page
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX37"><Properties><string name="Name">Rebirth</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX38"><Properties><string name="Name">Rebirth</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
@@ -4071,7 +4071,7 @@ function Page.render(content)
 end
 
 return Page
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX38"><Properties><string name="Name">Research</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX39"><Properties><string name="Name">Research</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Research = require(Shared:WaitForChild("Research"))
@@ -4135,7 +4135,7 @@ function Page.render(content)
 end
 
 return Page
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX39"><Properties><string name="Name">Settings</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX40"><Properties><string name="Name">Settings</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
@@ -4173,7 +4173,7 @@ function Page.render(content)
 end
 
 return Page
-]]></ProtectedString></Properties></Item></Item><Item class="ModuleScript" referent="RBX41"><Properties><string name="Name">State</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item></Item><Item class="ModuleScript" referent="RBX42"><Properties><string name="Name">State</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Client-side mirror of the server profile. Read-only: all changes happen by asking the server.
 -- Rates are derived with the SAME shared Stats module the server uses, so displayed numbers match.
 
@@ -4259,7 +4259,7 @@ function State.request(action, args)
 end
 
 return State
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX42"><Properties><string name="Name">Theme</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX43"><Properties><string name="Name">Theme</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Visual system: one palette, one type scale, rarity colours from shared Config.
 
 local Config = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("Config"))
@@ -4289,7 +4289,7 @@ function Theme.rarity(i: number): Color3
 end
 
 return Theme
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX43"><Properties><string name="Name">UI</string><ProtectedString name="Source"><![CDATA[--!nonstrict
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX44"><Properties><string name="Name">UI</string><ProtectedString name="Source"><![CDATA[--!nonstrict
 -- Small immediate-style UI toolkit on top of Roblox GuiObjects (no external deps).
 
 local TweenService = game:GetService("TweenService")
